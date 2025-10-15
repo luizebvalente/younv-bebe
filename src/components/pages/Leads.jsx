@@ -1314,6 +1314,7 @@ export default function Leads() {
                                 <SelectItem value="Facebook">Facebook</SelectItem>
                                 <SelectItem value="Indicação">Indicação</SelectItem>
                                 <SelectItem value="Outros">Outros</SelectItem>
+                                <SelectItem value="Biofao">Biofao</SelectItem>
                               </SelectContent>
                             </Select>
                           </div>
