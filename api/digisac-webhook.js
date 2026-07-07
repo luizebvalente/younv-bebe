@@ -275,11 +275,18 @@ async function fetchContactFromDigisac(contactId) {
         'Authorization': `Bearer ${apiToken}`,
         'Content-Type': 'application/json'
       },
-      timeout: 5000 // 5 segundos
+      // A opção `timeout` NÃO é suportada pelo fetch do runtime (undici) — era ignorada.
+      // O correto é abortar via AbortSignal.
+      signal: AbortSignal.timeout(5000) // 5 segundos
     });
 
     if (!response.ok) {
-      console.warn(`⚠️ Erro ao buscar contato: ${response.status} ${response.statusText}`);
+      if (response.status === 401 || response.status === 403) {
+        console.error(`🔑 DIGISAC_API_TOKEN INVÁLIDO/EXPIRADO (HTTP ${response.status}). ` +
+          `Os leads serão criados como "Contato <id>" / "ID-<id>" até o token ser renovado no Vercel.`);
+      } else {
+        console.warn(`⚠️ Erro ao buscar contato: ${response.status} ${response.statusText}`);
+      }
       return null;
     }
 
@@ -380,15 +387,15 @@ async function findLeadByPhoneOptimized(phone) {
       return lead;
     }
     
-    // 3. Se não encontrou, buscar variações comuns (5-6 leituras)
+    // 3. Se não encontrou, buscar TODAS variações comuns de formatação
     const variations = getPhoneVariations(phone);
-    
+
     for (const variation of variations) {
       const snapshot = await db.collection('leads')
         .where('telefone', '==', variation)
         .limit(1)
         .get();
-      
+
       if (!snapshot.empty) {
         const doc = snapshot.docs[0];
         const lead = { id: doc.id, ...doc.data() };
@@ -397,20 +404,20 @@ async function findLeadByPhoneOptimized(phone) {
         return lead;
       }
     }
-    
-    // 4. Fallback: buscar últimos 100 leads e comparar (100 leituras no pior caso)
-    const recentLeads = await db.collection('leads')
-      .orderBy('createdAt', 'desc')
-      .limit(100)
+
+    // 4. Fallback otimizado: buscar apenas campo telefone para comparação
+    //    Usa select() para minimizar custo de leitura
+    const allLeads = await db.collection('leads')
+      .select('telefone')
       .get();
-    
-    for (const doc of recentLeads.docs) {
+
+    for (const doc of allLeads.docs) {
       const leadData = doc.data();
       const leadPhone = normalizePhone(leadData.telefone || '');
-      
-      if (leadPhone === normalizedPhone) {
+
+      if (leadPhone && leadPhone === normalizedPhone) {
         const lead = { id: doc.id, ...leadData };
-        console.log(`✅ Lead existente encontrado: ${doc.id} (telefone: ${leadData.telefone})`);
+        console.log(`✅ Lead existente encontrado (fallback): ${doc.id} (telefone: ${leadData.telefone})`);
         setCachedLead(normalizedPhone, lead);
         return lead;
       }
@@ -483,24 +490,32 @@ function getPhoneVariations(phone) {
   if (!normalized) return [];
   
   const variations = [];
-  
-  // Formato (XX) XXXXX-XXXX
+
   if (normalized.length === 11) {
-    variations.push(`(${normalized.substring(0, 2)}) ${normalized.substring(2, 7)}-${normalized.substring(7)}`);
+    const ddd = normalized.substring(0, 2);
+    const p1 = normalized.substring(2, 7);
+    const p2 = normalized.substring(7);
+    // Formato com espaço: (XX) XXXXX-XXXX
+    variations.push(`(${ddd}) ${p1}-${p2}`);
+    // Formato sem espaço: (XX)XXXXX-XXXX
+    variations.push(`(${ddd})${p1}-${p2}`);
   }
-  
-  // Formato (XX) XXXX-XXXX
+
   if (normalized.length === 10) {
-    variations.push(`(${normalized.substring(0, 2)}) ${normalized.substring(2, 6)}-${normalized.substring(6)}`);
+    const ddd = normalized.substring(0, 2);
+    const p1 = normalized.substring(2, 6);
+    const p2 = normalized.substring(6);
+    variations.push(`(${ddd}) ${p1}-${p2}`);
+    variations.push(`(${ddd})${p1}-${p2}`);
   }
-  
+
   // Com código do país
   variations.push(`+55 ${formatBrazilianPhone(normalized)}`);
   variations.push(`55${normalized}`);
-  
+
   // Sem formatação
   variations.push(normalized);
-  
+
   return variations;
 }
 

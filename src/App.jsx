@@ -17,7 +17,10 @@ import Procedimentos from './components/pages/Procedimentos'
 import Leads from './components/pages/Leads'
 import Lembretes from './components/pages/Lembretes'
 import Relatorios from './components/pages/Relatorios'
+import RelatorioRecorrentes from './components/pages/RelatorioRecorrentes'
 import Estoque from './components/pages/estoque/Estoque'
+import GestaoCarteira from './components/pages/GestaoCarteira'
+import PosConsulta from './components/pages/PosConsulta'
 import Login from './components/pages/Login'
 
 // Componente principal da aplicação autenticada
@@ -29,12 +32,12 @@ function AuthenticatedApp() {
     <div className="flex h-screen bg-gray-100">
       {/* Sidebar */}
       <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
-      
+
       {/* Main Content */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Header */}
         <Header onMenuClick={() => setSidebarOpen(true)} user={user} />
-        
+
         {/* Page Content */}
         <main className="flex-1 overflow-x-hidden overflow-y-auto bg-gray-100">
           <Routes>
@@ -46,7 +49,10 @@ function AuthenticatedApp() {
             <Route path="/leads" element={<Leads />} />
             <Route path="/lembretes" element={<Lembretes />} />
             <Route path="/relatorios" element={<Relatorios />} />
+            <Route path="/relatorio-recorrentes" element={<RelatorioRecorrentes />} />
             <Route path="/estoque" element={<Estoque />} />
+            <Route path="/gestao-carteira" element={<GestaoCarteira />} />
+            <Route path="/pos-consulta" element={<PosConsulta />} />
           </Routes>
         </main>
       </div>

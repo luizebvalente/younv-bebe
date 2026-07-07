@@ -4,13 +4,13 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { 
-  X, 
-  ArrowLeft, 
-  Search, 
-  Phone, 
-  Mail, 
-  Calendar, 
+import {
+  X,
+  ArrowLeft,
+  Search,
+  Phone,
+  Mail,
+  Calendar,
   DollarSign,
   User,
   ChevronRight,
@@ -20,52 +20,26 @@ import {
   UserPlus,
   AlertTriangle,
   Loader2,
-  Tag
+  Tag,
+  CalendarClock,
+  CalendarX,
+  CalendarMinus,
+  UserX,
+  PhoneCall,
+  PhoneForwarded
 } from 'lucide-react'
+import { FUNIL_COLUMNS } from '@/constants/crm'
 
-// Configuração das colunas do funil
-const FUNIL_COLUMNS = [
-  { 
-    id: 'sem_interacao', 
-    title: 'Sem Interação', 
-    status: 'Sem Interação',
-    color: 'bg-gray-100 border-gray-300',
-    textColor: 'text-gray-800',
-    icon: User
-  },
-  { 
-    id: 'em_conversa', 
-    title: 'Em Conversa', 
-    status: 'Em Conversa',
-    color: 'bg-blue-100 border-blue-300',
-    textColor: 'text-blue-800',
-    icon: Phone
-  },
-  { 
-    id: 'agendado', 
-    title: 'Agendado', 
-    status: 'Agendado',
-    color: 'bg-yellow-100 border-yellow-300',
-    textColor: 'text-yellow-800',
-    icon: Calendar
-  },
-  { 
-    id: 'confirmado', 
-    title: 'Confirmado', 
-    status: 'Confirmado',
-    color: 'bg-purple-100 border-purple-300',
-    textColor: 'text-purple-800',
-    icon: UserPlus
-  },
-  { 
-    id: 'convertido', 
-    title: 'Convertido', 
-    status: 'Convertido',
-    color: 'bg-green-100 border-green-300',
-    textColor: 'text-green-800',
-    icon: TrendingUp
-  }
-]
+// Mapeamento de nomes de ícone para componentes React
+const ICON_MAP = {
+  User, Phone, Calendar, CalendarClock, CalendarX, UserPlus, UserX,
+  CalendarMinus, PhoneCall, PhoneForwarded, TrendingUp
+}
+
+const KANBAN_COLUMNS = FUNIL_COLUMNS.map(col => ({
+  ...col,
+  icon: ICON_MAP[col.iconName] || User
+}))
 
 export default function FunilKanban({ leads, medicos, especialidades, tags, onUpdateLead, onClose }) {
   const [searchTerm, setSearchTerm] = useState('')
@@ -164,13 +138,11 @@ export default function FunilKanban({ leads, medicos, especialidades, tags, onUp
   // Calcular estatísticas
   const stats = {
     total: filteredLeads.length,
-    semInteracao: getLeadsByColumn('Sem Interação').length,
-    emConversa: getLeadsByColumn('Em Conversa').length,
-    agendado: getLeadsByColumn('Agendado').length,
-    confirmado: getLeadsByColumn('Confirmado').length,
-    convertido: getLeadsByColumn('Convertido').length,
-    valorTotal: filteredLeads.reduce((sum, lead) => sum + (lead.valor_orcado || 0), 0),
-    valorConvertido: getLeadsByColumn('Convertido').reduce((sum, lead) => sum + (lead.valor_orcado || 0), 0)
+    ...Object.fromEntries(
+      KANBAN_COLUMNS.map(col => [col.id, getLeadsByColumn(col.status).length])
+    ),
+    valorTotal: filteredLeads.reduce((sum, lead) => sum + (parseFloat(lead.valor_orcado) || 0), 0),
+    valorConvertido: getLeadsByColumn('Convertido').reduce((sum, lead) => sum + (parseFloat(lead.valor_orcado) || 0), 0)
   }
 
   const taxaConversao = stats.total > 0 ? ((stats.convertido / stats.total) * 100).toFixed(1) : 0
@@ -251,71 +223,28 @@ export default function FunilKanban({ leads, medicos, especialidades, tags, onUp
 
         {/* Estatísticas */}
         <div className="bg-gray-50 border-b p-4 flex-shrink-0">
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
-            <Card className="bg-white border-2 border-blue-200">
-              <CardContent className="p-3">
-                <div className="text-xs text-gray-600 mb-1">Total de Leads</div>
-                <div className="text-2xl font-bold text-gray-900">{stats.total}</div>
-              </CardContent>
-            </Card>
-            
-            {FUNIL_COLUMNS.map(column => {
-              const count = getLeadsByColumn(column.status).length
-              const percentage = stats.total > 0 ? ((count / stats.total) * 100).toFixed(0) : 0
-              
-              return (
-                <Card key={column.id} className={`bg-white border-2 ${column.color.replace('bg-', 'border-')}`}>
-                  <CardContent className="p-3">
-                    <div className="text-xs text-gray-600 mb-1">{column.title}</div>
-                    <div className="flex items-baseline gap-2">
-                      <div className="text-2xl font-bold text-gray-900">{count}</div>
-                      <div className="text-xs text-gray-500">{percentage}%</div>
-                    </div>
-                  </CardContent>
-                </Card>
-              )
-            })}
-
-            <Card className="bg-gradient-to-br from-green-50 to-green-100 border-2 border-green-200">
-              <CardContent className="p-3">
-                <div className="text-xs text-green-700 mb-1">Taxa de Conversão</div>
-                <div className="text-2xl font-bold text-green-800">{taxaConversao}%</div>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Valores */}
-          <div className="grid grid-cols-2 gap-4 mt-4">
-            <Card className="bg-blue-50 border-2 border-blue-200">
-              <CardContent className="p-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="text-xs text-blue-700 mb-1">Valor Total em Pipeline</div>
-                    <div className="text-xl font-bold text-blue-900">{formatCurrency(stats.valorTotal)}</div>
-                  </div>
-                  <DollarSign className="h-8 w-8 text-blue-400" />
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="bg-green-50 border-2 border-green-200">
-              <CardContent className="p-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="text-xs text-green-700 mb-1">Valor Convertido</div>
-                    <div className="text-xl font-bold text-green-900">{formatCurrency(stats.valorConvertido)}</div>
-                  </div>
-                  <TrendingUp className="h-8 w-8 text-green-400" />
-                </div>
-              </CardContent>
-            </Card>
+          <div className="flex gap-2 overflow-x-auto pb-2">
+            <div className="flex-shrink-0 bg-white rounded-lg p-3 shadow-sm border min-w-[120px]">
+              <p className="text-xs text-gray-500">Total</p>
+              <p className="text-xl font-bold">{stats.total}</p>
+            </div>
+            {KANBAN_COLUMNS.map(col => (
+              <div key={col.id} className={`flex-shrink-0 rounded-lg p-3 shadow-sm border min-w-[100px] ${col.color}`}>
+                <p className={`text-xs ${col.textColor}`}>{col.title}</p>
+                <p className={`text-lg font-bold ${col.textColor}`}>{stats[col.id] || 0}</p>
+              </div>
+            ))}
+            <div className="flex-shrink-0 bg-white rounded-lg p-3 shadow-sm border min-w-[140px]">
+              <p className="text-xs text-gray-500">Valor Total</p>
+              <p className="text-lg font-bold text-green-600">R$ {(stats.valorTotal || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+            </div>
           </div>
         </div>
 
         {/* Kanban Board - ALTURA FIXA COM OVERFLOW */}
         <div className="flex-1 overflow-hidden">
           <div className="flex gap-4 p-4 h-full overflow-x-auto">
-            {FUNIL_COLUMNS.map(column => {
+            {KANBAN_COLUMNS.map(column => {
               const columnLeads = getLeadsByColumn(column.status)
               const columnValue = columnLeads.reduce((sum, lead) => sum + (lead.valor_orcado || 0), 0)
               const Icon = column.icon
@@ -323,7 +252,7 @@ export default function FunilKanban({ leads, medicos, especialidades, tags, onUp
               return (
                 <div
                   key={column.id}
-                  className="flex-shrink-0 w-80 h-full"
+                  className="flex-shrink-0 w-60 h-full"
                   onDragOver={handleDragOver}
                   onDrop={(e) => handleDrop(e, column.status)}
                 >
@@ -494,7 +423,7 @@ export default function FunilKanban({ leads, medicos, especialidades, tags, onUp
             <ChevronRight className="h-4 w-4" />
             <div className="flex items-center gap-2">
               <Eye className="h-4 w-4" />
-              <span>Total: {stats.total} leads • Convertidos: {stats.convertido} ({taxaConversao}%)</span>
+              <span>Total: {stats.total} leads • Convertidos: {stats['convertido'] || 0} ({taxaConversao}%)</span>
             </div>
           </div>
         </div>

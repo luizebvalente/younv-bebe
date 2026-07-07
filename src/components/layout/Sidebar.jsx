@@ -1,11 +1,11 @@
 import { Link, useLocation } from 'react-router-dom'
 import { cn } from '@/lib/utils'
-import { 
-  LayoutDashboard, 
-  UserPlus, 
-  Users, 
-  Activity, 
-  ClipboardList, 
+import {
+  LayoutDashboard,
+  UserPlus,
+  Users,
+  Activity,
+  ClipboardList,
   BarChart3,
   DollarSign,
   Calendar,
@@ -13,15 +13,18 @@ import {
   ChevronLeft,
   ChevronRight,
   Bell,
-  Package
+  Package,
+  Repeat,
+  BookUser,
+  ClipboardCheck
 } from 'lucide-react'
 import { useRealtimeFirestore } from '@/hooks/useFirestore'
 import { useMemo, useState, useEffect } from 'react'
 
-export default function Sidebar({ isOpen = false, onClose = () => {} }) {
+export default function Sidebar({ isOpen = false, onClose = () => { } }) {
   const location = useLocation()
   const { data: leads, loading: leadsLoading } = useRealtimeFirestore('leads')
-  
+
   // Estado de colapso - carregar do localStorage
   const [isCollapsed, setIsCollapsed] = useState(() => {
     const saved = localStorage.getItem('sidebarCollapsed')
@@ -36,14 +39,14 @@ export default function Sidebar({ isOpen = false, onClose = () => {} }) {
   // Função para verificar se uma data é hoje
   const isToday = (dateString) => {
     if (!dateString) return false
-    
+
     try {
       const date = new Date(dateString)
       const today = new Date()
-      
+
       const dateOnly = new Date(date.getFullYear(), date.getMonth(), date.getDate())
       const todayOnly = new Date(today.getFullYear(), today.getMonth(), today.getDate())
-      
+
       return dateOnly.getTime() === todayOnly.getTime()
     } catch (error) {
       console.error('Erro ao verificar data:', error)
@@ -107,55 +110,87 @@ export default function Sidebar({ isOpen = false, onClose = () => {} }) {
     }
   }, [leads, leadsLoading])
 
+  // Alertas de abandono
+  const alertasAbandono = useMemo(() => {
+    if (!leads || leads.length === 0) return 0
+    return leads.filter(lead => {
+      if ((lead.total_visitas || 0) < 2) return false
+      const avg = lead.media_dias_entre_visitas || 30
+      const lastVisit = lead.ultima_visita ? new Date(lead.ultima_visita) : null
+      if (!lastVisit || isNaN(lastVisit.getTime())) return false
+      const daysSince = Math.floor((Date.now() - lastVisit.getTime()) / (1000 * 60 * 60 * 24))
+      return daysSince > avg * 2
+    }).length
+  }, [leads])
+
   const navigation = [
-    { 
-      name: 'Dashboard', 
-      href: '/dashboard', 
+    {
+      name: 'Dashboard',
+      href: '/dashboard',
       icon: LayoutDashboard,
       description: 'Visão geral'
     },
-    { 
-      name: 'Leads', 
-      href: '/leads', 
+    {
+      name: 'Leads',
+      href: '/leads',
       icon: UserPlus,
       description: 'Gestão de leads',
       badge: stats.totalLeads
     },
-    { 
-      name: 'Lembretes', 
-      href: '/lembretes', 
+    {
+      name: 'Lembretes',
+      href: '/lembretes',
       icon: Bell,
       description: 'Lembretes de leads'
     },
-    { 
-      name: 'Médicos', 
-      href: '/medicos', 
+    {
+      name: 'Médicos',
+      href: '/medicos',
       icon: Users,
       description: 'Profissionais'
     },
-    { 
-      name: 'Especialidades', 
-      href: '/especialidades', 
+    {
+      name: 'Especialidades',
+      href: '/especialidades',
       icon: Activity,
       description: 'Áreas médicas'
     },
-    { 
-      name: 'Procedimentos', 
-      href: '/procedimentos', 
+    {
+      name: 'Procedimentos',
+      href: '/procedimentos',
       icon: ClipboardList,
       description: 'Serviços'
     },
-    { 
-      name: 'Estoque', 
-      href: '/estoque', 
+    {
+      name: 'Estoque',
+      href: '/estoque',
       icon: Package,
       description: 'Gestão de estoque'
     },
-    { 
-      name: 'Relatórios', 
-      href: '/relatorios', 
+    {
+      name: 'Gestão de Carteira',
+      href: '/gestao-carteira',
+      icon: BookUser,
+      description: 'Carteiras de pacientes',
+      alertBadge: alertasAbandono
+    },
+    {
+      name: 'Pós-Consulta',
+      href: '/pos-consulta',
+      icon: ClipboardCheck,
+      description: 'Acompanhamento pós-atendimento'
+    },
+    {
+      name: 'Relatórios',
+      href: '/relatorios',
       icon: BarChart3,
       description: 'Análises'
+    },
+    {
+      name: 'Recorrentes',
+      href: '/relatorio-recorrentes',
+      icon: Repeat,
+      description: 'Pacientes recorrentes'
     }
   ]
 
@@ -163,9 +198,9 @@ export default function Sidebar({ isOpen = false, onClose = () => {} }) {
     if (value >= 1000) {
       return `${(value / 1000).toFixed(1)}k`
     }
-    return value.toLocaleString('pt-BR', { 
+    return value.toLocaleString('pt-BR', {
       minimumFractionDigits: 0,
-      maximumFractionDigits: 0 
+      maximumFractionDigits: 0
     })
   }
 
@@ -183,7 +218,7 @@ export default function Sidebar({ isOpen = false, onClose = () => {} }) {
     <>
       {/* Overlay para mobile */}
       {isOpen && (
-        <div 
+        <div
           className="fixed inset-0 bg-black bg-opacity-50 z-40 lg:hidden"
           onClick={onClose}
         />
@@ -204,7 +239,7 @@ export default function Sidebar({ isOpen = false, onClose = () => {} }) {
           )}>
             <div className="flex w-full justify-between items-center">
               {!isCollapsed && <div></div>}
-              
+
               {/* Mobile: X para fechar */}
               <button
                 onClick={onClose}
@@ -212,7 +247,7 @@ export default function Sidebar({ isOpen = false, onClose = () => {} }) {
               >
                 <X className="h-5 w-5" />
               </button>
-              
+
               {/* Desktop: Botão para colapsar/expandir */}
               <button
                 onClick={toggleCollapse}
@@ -226,19 +261,19 @@ export default function Sidebar({ isOpen = false, onClose = () => {} }) {
                 )}
               </button>
             </div>
-            
+
             {/* Logo */}
             <div className="flex items-center justify-center">
-              <img 
-                src="/Younv-Official.png" 
-                alt="Younv" 
+              <img
+                src="/Younv-Official.png"
+                alt="Younv"
                 className={cn(
                   "transition-all duration-300",
                   isCollapsed ? "h-8 w-auto" : "h-12 w-auto"
                 )}
               />
             </div>
-            
+
             {/* Título - só aparece quando expandido */}
             {!isCollapsed && (
               <div className="text-center">
@@ -246,7 +281,7 @@ export default function Sidebar({ isOpen = false, onClose = () => {} }) {
                 <p className="text-sm text-gray-400">v2.0</p>
               </div>
             )}
-            
+
             {/* Título mini - só aparece quando colapsado */}
             {isCollapsed && (
               <div className="text-center">
@@ -286,8 +321,13 @@ export default function Sidebar({ isOpen = false, onClose = () => {} }) {
                             {item.badge > 99 ? '99+' : item.badge}
                           </span>
                         )}
+                        {item.alertBadge > 0 && (
+                          <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[20px] text-center">
+                            {item.alertBadge > 99 ? '99+' : item.alertBadge}
+                          </span>
+                        )}
                       </div>
-                      
+
                       {/* Tooltip ao passar o mouse */}
                       <div className="absolute left-full ml-2 px-3 py-2 bg-gray-800 text-white text-sm rounded-md opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50 shadow-lg">
                         <div className="font-medium">{item.name}</div>
@@ -314,6 +354,11 @@ export default function Sidebar({ isOpen = false, onClose = () => {} }) {
                           {item.badge}
                         </span>
                       )}
+                      {item.alertBadge > 0 && (
+                        <span className="ml-auto bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">
+                          {item.alertBadge}
+                        </span>
+                      )}
                     </>
                   )}
                 </Link>
@@ -330,7 +375,7 @@ export default function Sidebar({ isOpen = false, onClose = () => {} }) {
               // Versão expandida
               <>
                 <h3 className="text-sm font-medium text-gray-400 mb-3">RESUMO DE HOJE</h3>
-                
+
                 {leadsLoading ? (
                   <div className="space-y-3">
                     <div className="animate-pulse bg-gray-700 h-4 rounded"></div>
@@ -346,7 +391,7 @@ export default function Sidebar({ isOpen = false, onClose = () => {} }) {
                       </div>
                       <span className="text-lg font-bold text-blue-400">{stats.leadsHoje}</span>
                     </div>
-                    
+
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <Calendar className="h-4 w-4 text-green-400" />
@@ -354,7 +399,7 @@ export default function Sidebar({ isOpen = false, onClose = () => {} }) {
                       </div>
                       <span className="text-lg font-bold text-green-400">{stats.agendamentosHoje}</span>
                     </div>
-                    
+
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <DollarSign className="h-4 w-4 text-yellow-400" />
@@ -387,7 +432,7 @@ export default function Sidebar({ isOpen = false, onClose = () => {} }) {
                     <div className="text-lg font-bold text-blue-400">{stats.leadsHoje}</div>
                   </div>
                 </div>
-                
+
                 <div className="relative group">
                   <div className="flex items-center justify-center p-2 rounded-md hover:bg-gray-800 cursor-pointer">
                     <Calendar className="h-5 w-5 text-green-400" />
@@ -397,7 +442,7 @@ export default function Sidebar({ isOpen = false, onClose = () => {} }) {
                     <div className="text-lg font-bold text-green-400">{stats.agendamentosHoje}</div>
                   </div>
                 </div>
-                
+
                 <div className="relative group">
                   <div className="flex items-center justify-center p-2 rounded-md hover:bg-gray-800 cursor-pointer">
                     <DollarSign className="h-5 w-5 text-yellow-400" />

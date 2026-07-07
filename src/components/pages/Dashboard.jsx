@@ -1,20 +1,25 @@
 import { useState, useEffect } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { 
-  BarChart, 
-  Bar, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip, 
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
   ResponsiveContainer,
   LineChart,
-  Line
+  Line,
+  PieChart,
+  Pie,
+  Cell,
+  Legend
 } from 'recharts'
-import { Users, UserPlus, Calendar, TrendingUp, DollarSign, Target, Activity, Loader2, Zap, Clock } from 'lucide-react'
+import { Users, UserPlus, Calendar, TrendingUp, DollarSign, Target, Activity, Loader2, Zap, Clock, Repeat, Award, ArrowUpRight, ArrowDownRight, AlertTriangle } from 'lucide-react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import firebaseDataService from '@/services/firebaseDataService'
+import { STATUS_COLORS } from '@/constants/crm'
 
 const Dashboard = () => {
   const [leads, setLeads] = useState([])
@@ -65,6 +70,20 @@ const Dashboard = () => {
   const convertidos = leads.filter(l => l.status === 'Convertido').length
   const taxaConversao = totalLeads > 0 ? ((convertidos / totalLeads) * 100).toFixed(1) : 0
   const valorTotal = leads.reduce((sum, lead) => sum + (lead.valor_orcado || 0), 0)
+
+  // Total em R$ de conversões (Convertido = valor_orcado; Convertido Parcial = valor_fechado_parcial)
+  const leadsConvertidos = leads.filter(l =>
+    l.status === 'Convertido' ||
+    l.orcamento_fechado === 'Total' ||
+    l.orcamento_fechado === 'Parcial'
+  )
+  const valorConversoes = leadsConvertidos.reduce((sum, l) => {
+    if (l.orcamento_fechado === 'Parcial') {
+      return sum + (parseFloat(l.valor_fechado_parcial) || 0)
+    }
+    return sum + (parseFloat(l.valor_orcado) || 0)
+  }, 0)
+  const ticketMedioConversao = leadsConvertidos.length > 0 ? valorConversoes / leadsConvertidos.length : 0
 
   // CORREÇÃO COMPLETA: Função para normalizar data (sem horário)
   const normalizarData = (data) => {
@@ -137,6 +156,148 @@ const Dashboard = () => {
       data_normalizada: l.data_registro_contato ? normalizarData(l.data_registro_contato).toISOString() : null
     }))
   })
+
+  // === MÉTRICAS DE RECORRÊNCIA ===
+  const leadsRecorrentes = leads.filter(l => l.tipo_visita === 'Recorrente' || (l.total_visitas || 0) > 1)
+  const leadsPrimeiraVez = leads.filter(l => l.tipo_visita === 'Primeira Visita' || (!l.tipo_visita && (l.total_visitas || 0) <= 1))
+  const taxaRecorrencia = totalLeads > 0 ? ((leadsRecorrentes.length / totalLeads) * 100).toFixed(1) : 0
+
+  const convertidosRecorrentes = leadsRecorrentes.filter(l => l.status === 'Convertido' || l.orcamento_fechado === 'Total' || l.orcamento_fechado === 'Parcial').length
+  const convertidosPrimeiraVez = leadsPrimeiraVez.filter(l => l.status === 'Convertido' || l.orcamento_fechado === 'Total' || l.orcamento_fechado === 'Parcial').length
+  const taxaConversaoRecorrentes = leadsRecorrentes.length > 0 ? ((convertidosRecorrentes / leadsRecorrentes.length) * 100).toFixed(1) : 0
+  const taxaConversaoPrimeiraVez = leadsPrimeiraVez.length > 0 ? ((convertidosPrimeiraVez / leadsPrimeiraVez.length) * 100).toFixed(1) : 0
+
+  const receitaRecorrentes = leadsRecorrentes.reduce((sum, l) => {
+    const valorVisitas = l.valor_total_visitas || 0
+    const valorProdutos = l.total_gasto_produtos || 0
+    const valorGasto = l.valor_total_gasto || (valorVisitas + valorProdutos)
+    return sum + (valorGasto > 0 ? valorGasto : (l.valor_orcado || 0))
+  }, 0)
+
+  const receitaPrimeiraVez = leadsPrimeiraVez.reduce((sum, l) => sum + (l.valor_orcado || 0), 0)
+
+  // === RANKING POR INDICADORES ===
+  // Ranking de médicos por volume e conversão
+  const rankingMedicos = medicos.map(medico => {
+    const medicoLeads = leads.filter(l => l.medico_agendado_id === medico.id)
+    const medicoConvertidos = medicoLeads.filter(l => l.status === 'Convertido' || l.orcamento_fechado === 'Total' || l.orcamento_fechado === 'Parcial')
+    const medicoReceita = medicoConvertidos.reduce((sum, l) => {
+      if (l.orcamento_fechado === 'Parcial') return sum + (l.valor_fechado_parcial || 0)
+      return sum + (l.valor_orcado || 0)
+    }, 0)
+    return {
+      nome: medico.nome,
+      totalLeads: medicoLeads.length,
+      convertidos: medicoConvertidos.length,
+      taxaConversao: medicoLeads.length > 0 ? ((medicoConvertidos.length / medicoLeads.length) * 100).toFixed(1) : '0.0',
+      receita: medicoReceita
+    }
+  }).filter(m => m.totalLeads > 0).sort((a, b) => b.totalLeads - a.totalLeads)
+
+  // Ranking de canais por volume e conversão
+  const rankingCanais = (() => {
+    const canaisMap = {}
+    leads.forEach(lead => {
+      const canal = lead.canal_contato || 'Não informado'
+      if (!canaisMap[canal]) canaisMap[canal] = { nome: canal, totalLeads: 0, convertidos: 0, receita: 0 }
+      canaisMap[canal].totalLeads++
+      if (lead.status === 'Convertido' || lead.orcamento_fechado === 'Total' || lead.orcamento_fechado === 'Parcial') {
+        canaisMap[canal].convertidos++
+        canaisMap[canal].receita += lead.orcamento_fechado === 'Parcial' ? (lead.valor_fechado_parcial || 0) : (lead.valor_orcado || 0)
+      }
+    })
+    return Object.values(canaisMap).map(c => ({
+      ...c,
+      taxaConversao: c.totalLeads > 0 ? ((c.convertidos / c.totalLeads) * 100).toFixed(1) : '0.0'
+    })).sort((a, b) => b.totalLeads - a.totalLeads)
+  })()
+
+  // Ticket Medio Global
+  const ticketMedioGlobal = (() => {
+    const convertidos = leads.filter(l =>
+      l.status === 'Convertido' || l.orcamento_fechado === 'Total' || l.orcamento_fechado === 'Parcial'
+    )
+    if (convertidos.length === 0) return 0
+    const totalReceita = convertidos.reduce((sum, l) => {
+      const consulta = parseFloat(l.valor_consulta) || 0
+      const procedimento = parseFloat(l.valor_procedimento) || 0
+      const produtos = parseFloat(l.total_gasto_produtos) || 0
+      const orcado = parseFloat(l.valor_orcado) || 0
+      return sum + (consulta + procedimento + produtos > 0 ? consulta + procedimento + produtos : orcado)
+    }, 0)
+    return totalReceita / convertidos.length
+  })()
+
+  // Indicadores Operacionais
+  const indicadoresOperacionais = (() => {
+    const now = new Date()
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
+    const leadsDoMes = leads.filter(l => {
+      const date = new Date(l.data_registro_contato)
+      return date >= startOfMonth
+    })
+    return {
+      reagendamentos: leadsDoMes.filter(l => l.status === 'Reagendado').length,
+      cancelamentos: leadsDoMes.filter(l => l.status === 'Desmarcou').length,
+      faltas: leadsDoMes.filter(l => l.status === 'Faltou').length,
+      naoAgendou: leadsDoMes.filter(l => l.status === 'Não Agendou').length,
+    }
+  })()
+
+  // Oxigenacao da Carteira - Novos vs Recorrentes por mes
+  const oxigenacaoCarteira = (() => {
+    const months = {}
+    leads.forEach(lead => {
+      const dateStr = lead.data_registro_contato
+      if (!dateStr) return
+      const date = new Date(dateStr)
+      if (isNaN(date.getTime())) return
+      const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+      if (!months[key]) months[key] = { mes: key, novos: 0, recorrentes: 0 }
+      if (lead.tipo_visita === 'Recorrente' || (lead.total_visitas || 0) > 1) {
+        months[key].recorrentes++
+      } else {
+        months[key].novos++
+      }
+    })
+    return Object.values(months).sort((a, b) => a.mes.localeCompare(b.mes)).slice(-12)
+  })()
+
+  // Alertas de Abandono
+  const alertasAbandono = leads.filter(lead => {
+    if ((lead.total_visitas || 0) < 2) return false
+    const avg = lead.media_dias_entre_visitas || 30
+    const lastVisit = lead.ultima_visita ? new Date(lead.ultima_visita) : null
+    if (!lastVisit || isNaN(lastVisit.getTime())) return false
+    const daysSince = Math.floor((Date.now() - lastVisit.getTime()) / (1000 * 60 * 60 * 24))
+    return daysSince > avg * 2
+  }).length
+
+  // Previsao de Faturamento (media dos ultimos 3 meses)
+  const previsaoFaturamento = (() => {
+    const now = new Date()
+    const months = []
+    for (let i = 1; i <= 3; i++) {
+      const start = new Date(now.getFullYear(), now.getMonth() - i, 1)
+      const end = new Date(now.getFullYear(), now.getMonth() - i + 1, 0, 23, 59, 59)
+      const leadsDoMes = leads.filter(l => {
+        const d = new Date(l.data_registro_contato)
+        return d >= start && d <= end && (l.status === 'Convertido' || l.orcamento_fechado === 'Total' || l.orcamento_fechado === 'Parcial')
+      })
+      const receita = leadsDoMes.reduce((sum, l) => sum + (parseFloat(l.valor_orcado) || 0), 0)
+      months.push(receita)
+    }
+    const validMonths = months.filter(m => m > 0)
+    return validMonths.length > 0 ? validMonths.reduce((a, b) => a + b, 0) / validMonths.length : 0
+  })()
+
+  // Dados para gráfico de recorrência
+  const dadosRecorrencia = [
+    { tipo: 'Primeira Vez', quantidade: leadsPrimeiraVez.length, convertidos: convertidosPrimeiraVez, receita: receitaPrimeiraVez },
+    { tipo: 'Recorrentes', quantidade: leadsRecorrentes.length, convertidos: convertidosRecorrentes, receita: receitaRecorrentes }
+  ]
+
+  const COLORS_PIE = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#ec4899']
 
   // Leads recentes (últimos 5)
   const leadsRecentes = leads
@@ -310,7 +471,7 @@ const Dashboard = () => {
       </div>
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-6">
         <Card className="border-0 shadow-lg bg-gradient-to-br from-blue-50 to-blue-100 hover:shadow-xl transition-shadow">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium text-gray-700">
@@ -365,6 +526,27 @@ const Dashboard = () => {
           </CardContent>
         </Card>
 
+        {/* Card: Receita de Conversões */}
+        <Card className="border-0 shadow-lg bg-gradient-to-br from-emerald-50 to-emerald-100 hover:shadow-xl transition-shadow">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-gray-700">
+              Receita de Conversões
+            </CardTitle>
+            <div className="w-10 h-10 bg-emerald-500 rounded-lg flex items-center justify-center">
+              <DollarSign className="h-5 w-5 text-white" />
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-bold text-gray-900">
+              {formatCurrency(valorConversoes)}
+            </div>
+            <p className="text-sm text-gray-600 mt-2 flex items-center">
+              <TrendingUp className="h-4 w-4 text-emerald-600 mr-1" />
+              <span className="text-emerald-600 font-medium">{leadsConvertidos.length} convertidos</span>
+            </p>
+          </CardContent>
+        </Card>
+
         {/* CARD CORRIGIDO - Leads Hoje */}
         <Card className="border-0 shadow-lg bg-gradient-to-br from-orange-50 to-orange-100 hover:shadow-xl transition-shadow">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -389,7 +571,79 @@ const Dashboard = () => {
             </p>
           </CardContent>
         </Card>
+        <Card className="bg-white shadow-sm border border-gray-100">
+              <CardContent className="p-4">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-cyan-100 rounded-lg">
+                    <TrendingUp className="h-5 w-5 text-cyan-600" />
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-500">Ticket Médio</p>
+                    <p className="text-xl font-bold text-cyan-600">
+                      R$ {ticketMedioGlobal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="bg-white shadow-sm border border-gray-100">
+              <CardContent className="p-4">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-emerald-100 rounded-lg">
+                    <TrendingUp className="h-5 w-5 text-emerald-600" />
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-500">Previsão Mensal</p>
+                    <p className="text-xl font-bold text-emerald-600">
+                      R$ {previsaoFaturamento.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </p>
+                    <p className="text-[10px] text-gray-400">Média dos últimos 3 meses</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {alertasAbandono > 0 && (
+              <Card className="bg-red-50 shadow-sm border border-red-200">
+                <CardContent className="p-4">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-red-100 rounded-lg">
+                      <AlertTriangle className="h-5 w-5 text-red-600" />
+                    </div>
+                    <div>
+                      <p className="text-sm text-red-700">Alerta de Abandono</p>
+                      <p className="text-xl font-bold text-red-600">{alertasAbandono} pacientes</p>
+                      <p className="text-xs text-red-500">Sem visita há mais do que o dobro da média</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
       </div>
+
+      {/* Card: Total Investido na Clínica */}
+      <Card className="border-0 shadow-lg bg-gradient-to-br from-emerald-50 to-emerald-100 hover:shadow-xl transition-shadow">
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+          <CardTitle className="text-sm font-medium text-gray-700">
+            Total Investido na Clínica
+          </CardTitle>
+          <div className="w-10 h-10 bg-emerald-500 rounded-lg flex items-center justify-center">
+            <DollarSign className="h-5 w-5 text-white" />
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="text-3xl font-bold text-gray-900">
+            {formatCurrency(
+              leads.filter(l => l.status === 'Convertido').reduce((sum, l) => sum + (l.valor_orcado || 0), 0) +
+              leads.reduce((sum, l) => sum + (l.total_gasto_produtos || 0), 0)
+            )}
+          </div>
+          <p className="text-sm text-gray-600 mt-2">
+            {formatCurrency(leads.filter(l => l.status === 'Convertido').reduce((sum, l) => sum + (l.valor_orcado || 0), 0))} em procedimentos + {formatCurrency(leads.reduce((sum, l) => sum + (l.total_gasto_produtos || 0), 0))} em produtos
+          </p>
+        </CardContent>
+      </Card>
 
       {/* Charts Section - AMPLIADA PARA 3 GRÁFICOS */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -526,6 +780,287 @@ const Dashboard = () => {
             )}
           </CardContent>
         </Card>
+      </div>
+
+      {/* === SEÇÃO DE RECORRÊNCIA === */}
+      <div>
+        <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
+          <Repeat className="h-5 w-5 text-purple-600" />
+          Controle de Recorrência
+        </h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
+          <Card className="border-0 shadow-lg bg-gradient-to-br from-blue-50 to-blue-100">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium text-gray-700">Primeira Vez</CardTitle>
+              <div className="w-10 h-10 bg-blue-500 rounded-lg flex items-center justify-center">
+                <UserPlus className="h-5 w-5 text-white" />
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="text-3xl font-bold text-gray-900">{leadsPrimeiraVez.length}</div>
+              <div className="flex items-center mt-2 text-sm">
+                <span className="text-blue-600 font-medium">Conversão: {taxaConversaoPrimeiraVez}%</span>
+                <span className="ml-2 text-gray-500">({convertidosPrimeiraVez} convertidos)</span>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-0 shadow-lg bg-gradient-to-br from-purple-50 to-purple-100">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium text-gray-700">Recorrentes</CardTitle>
+              <div className="w-10 h-10 bg-purple-500 rounded-lg flex items-center justify-center">
+                <Repeat className="h-5 w-5 text-white" />
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="text-3xl font-bold text-gray-900">{leadsRecorrentes.length}</div>
+              <div className="flex items-center mt-2 text-sm">
+                <span className="text-purple-600 font-medium">Conversão: {taxaConversaoRecorrentes}%</span>
+                <span className="ml-2 text-gray-500">({convertidosRecorrentes} convertidos)</span>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-0 shadow-lg bg-gradient-to-br from-emerald-50 to-emerald-100">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium text-gray-700">Taxa de Recorrência</CardTitle>
+              <div className="w-10 h-10 bg-emerald-500 rounded-lg flex items-center justify-center">
+                <TrendingUp className="h-5 w-5 text-white" />
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="text-3xl font-bold text-gray-900">{taxaRecorrencia}%</div>
+              <p className="text-sm text-gray-600 mt-2">
+                dos pacientes retornam
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card className="border-0 shadow-lg bg-gradient-to-br from-amber-50 to-amber-100">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium text-gray-700">Receita Recorrentes</CardTitle>
+              <div className="w-10 h-10 bg-amber-500 rounded-lg flex items-center justify-center">
+                <DollarSign className="h-5 w-5 text-white" />
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-gray-900">{formatCurrency(receitaRecorrentes)}</div>
+              <p className="text-sm text-gray-600 mt-2">
+                1a vez: {formatCurrency(receitaPrimeiraVez)}
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Gráficos de Recorrência */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+          <Card className="border-0 shadow-lg">
+            <CardHeader>
+              <CardTitle className="flex items-center text-lg font-semibold">
+                <Repeat className="h-5 w-5 mr-2 text-purple-600" />
+                Primeira Vez vs Recorrentes
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ResponsiveContainer width="100%" height={280}>
+                <BarChart data={dadosRecorrencia}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                  <XAxis dataKey="tipo" tick={{ fontSize: 12 }} />
+                  <YAxis tick={{ fontSize: 11 }} />
+                  <Tooltip
+                    contentStyle={{ backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}
+                    formatter={(value, name) => {
+                      if (name === 'quantidade') return [value, 'Total']
+                      if (name === 'convertidos') return [value, 'Convertidos']
+                      return [value, name]
+                    }}
+                  />
+                  <Legend />
+                  <Bar dataKey="quantidade" fill="#3b82f6" name="Total" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="convertidos" fill="#10b981" name="Convertidos" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+
+          <Card className="border-0 shadow-lg">
+            <CardHeader>
+              <CardTitle className="flex items-center text-lg font-semibold">
+                <Target className="h-5 w-5 mr-2 text-emerald-600" />
+                Distribuição de Pacientes
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ResponsiveContainer width="100%" height={280}>
+                <PieChart>
+                  <Pie
+                    data={dadosRecorrencia}
+                    cx="50%"
+                    cy="50%"
+                    outerRadius={100}
+                    dataKey="quantidade"
+                    nameKey="tipo"
+                    label={({ tipo, quantidade, percent }) => `${tipo}: ${quantidade} (${(percent * 100).toFixed(0)}%)`}
+                  >
+                    {dadosRecorrencia.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={COLORS_PIE[index]} />
+                    ))}
+                  </Pie>
+                  <Tooltip formatter={(value) => [value, 'Pacientes']} />
+                </PieChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+
+      {/* Indicadores Operacionais */}
+          <Card className="bg-white shadow-sm border border-gray-100">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-lg font-semibold">Indicadores Operacionais (Mês Atual)</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="text-center p-3 rounded-lg bg-amber-50">
+                  <p className="text-2xl font-bold text-amber-600">{indicadoresOperacionais.reagendamentos}</p>
+                  <p className="text-xs text-amber-700">Reagendamentos</p>
+                </div>
+                <div className="text-center p-3 rounded-lg bg-red-50">
+                  <p className="text-2xl font-bold text-red-600">{indicadoresOperacionais.cancelamentos}</p>
+                  <p className="text-xs text-red-700">Cancelamentos</p>
+                </div>
+                <div className="text-center p-3 rounded-lg bg-orange-50">
+                  <p className="text-2xl font-bold text-orange-600">{indicadoresOperacionais.faltas}</p>
+                  <p className="text-xs text-orange-700">Faltas</p>
+                </div>
+                <div className="text-center p-3 rounded-lg bg-gray-50">
+                  <p className="text-2xl font-bold text-gray-600">{indicadoresOperacionais.naoAgendou}</p>
+                  <p className="text-xs text-gray-700">Não Agendou</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Oxigenação da Carteira */}
+          {oxigenacaoCarteira.length > 0 && (
+            <Card className="bg-white shadow-sm border border-gray-100">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-lg font-semibold">Oxigenação da Carteira (Novos vs Recorrentes)</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="h-64">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={oxigenacaoCarteira}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="mes" tick={{ fontSize: 11 }} />
+                      <YAxis />
+                      <Tooltip />
+                      <Bar dataKey="novos" name="Novos" fill="#3b82f6" stackId="a" />
+                      <Bar dataKey="recorrentes" name="Recorrentes" fill="#8b5cf6" stackId="a" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+      {/* === RANKING DE INDICADORES === */}
+      <div>
+        <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
+          <Award className="h-5 w-5 text-amber-600" />
+          Ranking de Indicadores
+        </h2>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Ranking de Médicos */}
+          <Card className="border-0 shadow-lg">
+            <CardHeader>
+              <CardTitle className="flex items-center text-lg font-semibold">
+                <Users className="h-5 w-5 mr-2 text-purple-600" />
+                Performance por Médico
+              </CardTitle>
+              <p className="text-sm text-gray-500">Ranking por volume de leads e conversão</p>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                {rankingMedicos.slice(0, 8).map((medico, index) => (
+                  <div key={index} className="flex items-center justify-between p-3 rounded-lg bg-gray-50 hover:bg-gray-100 transition-colors">
+                    <div className="flex items-center gap-3">
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white font-bold text-sm ${
+                        index === 0 ? 'bg-amber-500' : index === 1 ? 'bg-gray-400' : index === 2 ? 'bg-amber-700' : 'bg-gray-300'
+                      }`}>
+                        {index + 1}
+                      </div>
+                      <div>
+                        <p className="font-medium text-sm text-gray-900">{medico.nome}</p>
+                        <p className="text-xs text-gray-500">{medico.totalLeads} leads</p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="flex items-center gap-2">
+                        <Badge className={`text-xs ${
+                          parseFloat(medico.taxaConversao) >= 50 ? 'bg-green-100 text-green-800' :
+                          parseFloat(medico.taxaConversao) >= 30 ? 'bg-yellow-100 text-yellow-800' :
+                          'bg-red-100 text-red-800'
+                        }`}>
+                          {medico.taxaConversao}% conv.
+                        </Badge>
+                      </div>
+                      <p className="text-xs font-semibold text-green-600 mt-1">{formatCurrency(medico.receita)}</p>
+                    </div>
+                  </div>
+                ))}
+                {rankingMedicos.length === 0 && (
+                  <p className="text-center text-gray-500 py-4">Nenhum médico com leads</p>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Ranking de Canais */}
+          <Card className="border-0 shadow-lg">
+            <CardHeader>
+              <CardTitle className="flex items-center text-lg font-semibold">
+                <Zap className="h-5 w-5 mr-2 text-blue-600" />
+                Performance por Canal
+              </CardTitle>
+              <p className="text-sm text-gray-500">Ranking por volume de leads e conversão</p>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                {rankingCanais.slice(0, 8).map((canal, index) => (
+                  <div key={index} className="flex items-center justify-between p-3 rounded-lg bg-gray-50 hover:bg-gray-100 transition-colors">
+                    <div className="flex items-center gap-3">
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white font-bold text-sm ${
+                        index === 0 ? 'bg-blue-500' : index === 1 ? 'bg-blue-400' : index === 2 ? 'bg-blue-300' : 'bg-gray-300'
+                      }`}>
+                        {index + 1}
+                      </div>
+                      <div>
+                        <p className="font-medium text-sm text-gray-900">{canal.nome}</p>
+                        <p className="text-xs text-gray-500">{canal.totalLeads} leads</p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="flex items-center gap-2">
+                        <Badge className={`text-xs ${
+                          parseFloat(canal.taxaConversao) >= 50 ? 'bg-green-100 text-green-800' :
+                          parseFloat(canal.taxaConversao) >= 30 ? 'bg-yellow-100 text-yellow-800' :
+                          'bg-red-100 text-red-800'
+                        }`}>
+                          {canal.taxaConversao}% conv.
+                        </Badge>
+                      </div>
+                      <p className="text-xs font-semibold text-green-600 mt-1">{formatCurrency(canal.receita)}</p>
+                    </div>
+                  </div>
+                ))}
+                {rankingCanais.length === 0 && (
+                  <p className="text-center text-gray-500 py-4">Nenhum dado de canal</p>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       </div>
 
       {/* Recent Activity */}

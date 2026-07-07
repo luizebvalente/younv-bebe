@@ -1,6 +1,10 @@
 // Serviço de dados híbrido Firebase/localStorage - VERSÃO CORRIGIDA COM VALOR_AGENDAMENTO
 import firestoreService from './firebase/firestore'
 
+// Logger condicional — apenas em DEV. Em produção evita custo de serializar payloads grandes.
+const DEV = typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV
+const log = (...args) => { if (DEV) console.log(...args) }
+
 class FirebaseDataService {
   constructor() {
     this.useFirebase = true // Ativar Firebase
@@ -16,7 +20,7 @@ class FirebaseDataService {
         email: window.currentUser.email || ''
       }
     }
-    
+
     return {
       id: 'sistema',
       nome: 'Sistema',
@@ -28,11 +32,13 @@ class FirebaseDataService {
   getCollectionName(entity) {
     const mapping = {
       'especialidades': 'especialidades',
-      'medicos': 'medicos', 
+      'medicos': 'medicos',
       'procedimentos': 'procedimentos',
       'leads': 'leads',
       'tags': 'tags',
-      'lembretes': 'lembretes'
+      'lembretes': 'lembretes',
+      'carteiras_gestao': 'carteiras_gestao',
+      'pos_consulta': 'pos_consulta'
     }
     return mapping[entity] || entity
   }
@@ -41,20 +47,20 @@ class FirebaseDataService {
   transformToFirebase(entity, data) {
     if (entity === 'leads') {
       return {
-        nomePackiente: data.nome_paciente,
-        telefone: data.telefone,
-        dataNascimento: data.data_nascimento,
-        email: data.email,
-        canalContato: data.canal_contato,
-        solicitacaoPaciente: data.solicitacao_paciente,
-        medicoAgendadoId: data.medico_agendado_id,
-        especialidadeId: data.especialidade_id,
-        procedimentoAgendadoId: data.procedimento_agendado_id,
-        agendado: data.agendado,
-        motivoNaoAgendamento: data.motivo_nao_agendamento,
-        outrosProfissionaisAgendados: data.outros_profissionais_agendados,
-        quaisProfissionais: data.quais_profissionais,
-        
+        nomePackiente: data.nome_paciente || '',
+        telefone: data.telefone || '',
+        dataNascimento: data.data_nascimento || '',
+        email: data.email || '',
+        canalContato: data.canal_contato || '',
+        solicitacaoPaciente: data.solicitacao_paciente || '',
+        medicoAgendadoId: data.medico_agendado_id || '',
+        especialidadeId: data.especialidade_id || '',
+        procedimentoAgendadoId: data.procedimento_agendado_id || '',
+        agendado: data.agendado || false,
+        motivoNaoAgendamento: data.motivo_nao_agendamento || '',
+        outrosProfissionaisAgendados: data.outros_profissionais_agendados || false,
+        quaisProfissionais: data.quais_profissionais || '',
+
         // ✅ CORRIGIDO: Array de outros profissionais com valorAgendamento
         outrosProfissionais: data.outros_profissionais || [
           { medicoId: '', especialidadeId: '', procedimentoId: '', dataAgendamento: '', valorAgendamento: '', localAgendado: '', ativo: false },
@@ -71,11 +77,16 @@ class FirebaseDataService {
           localAgendado: prof.local_agendado || prof.localAgendado || '',
           ativo: prof.ativo || false
         })),
-        
-        pagouReserva: data.pagou_reserva,
-        tipoVisita: data.tipo_visita,
-        valorOrcado: data.valor_orcado,
-        orcamentoFechado: data.orcamento_fechado,
+
+        pagouReserva: data.pagou_reserva || false,
+        tipoVisita: data.tipo_visita || '',
+        valorOrcado: data.valor_orcado || '',
+        orcamentoFechado: data.orcamento_fechado || '',
+        valorConsulta: data.valor_consulta || '',
+        valorTaxaReserva: data.valor_taxa_reserva || '',
+        valorProcedimento: data.valor_procedimento || '',
+        identificacaoProcedimento: data.identificacao_procedimento || '',
+        dataConsultaEfetiva: data.data_consulta_efetiva || '',
         valorFechadoParcial: data.valor_fechado_parcial || 0,
         followup1Realizado: data.followup1_realizado || false,
         followup1Data: data.followup1_data || '',
@@ -83,36 +94,68 @@ class FirebaseDataService {
         followup2Data: data.followup2_data || '',
         followup3Realizado: data.followup3_realizado || false,
         followup3Data: data.followup3_data || '',
-        observacaoGeral: data.observacao_geral,
-        perfilComportamentalDisc: data.perfil_comportamental_disc,
-        status: data.status,
-        dataRegistroContato: data.data_registro_contato,
+        nomePai: data.nome_pai || '',
+        nomeMae: data.nome_mae || '',
+        observacaoGeral: data.observacao_geral || '',
+        perfilComportamentalDisc: data.perfil_comportamental_disc || '',
+        status: data.status || 'Sem Interação',
+        dataRegistroContato: data.data_registro_contato || new Date().toISOString(),
         tags: data.tags || [],
         // CAMPOS DE RASTREAMENTO DE USUÁRIO
-        criadoPorId: data.criado_por_id,
-        criadoPorNome: data.criado_por_nome,
-        criadoPorEmail: data.criado_por_email,
-        alteradoPorId: data.alterado_por_id,
-        alteradoPorNome: data.alterado_por_nome,
-        alteradoPorEmail: data.alterado_por_email,
-        dataUltimaAlteracao: data.data_ultima_alteracao,
+        criadoPorId: data.criado_por_id || '',
+        criadoPorNome: data.criado_por_nome || '',
+        criadoPorEmail: data.criado_por_email || '',
+        alteradoPorId: data.alterado_por_id || '',
+        alteradoPorNome: data.alterado_por_nome || '',
+        alteradoPorEmail: data.alterado_por_email || '',
+        dataUltimaAlteracao: data.data_ultima_alteracao || new Date().toISOString(),
         // CAMPOS DE HISTORICO DE CONSUMO
         historicoConsumo: (data.historico_consumo || []).map(consumo => ({
-          data: consumo.data,
-          produtoId: consumo.produto_id,
-          produtoNome: consumo.produto_nome,
-          loteNumero: consumo.lote_numero,
-          quantidade: consumo.quantidade,
-          valorUnitario: consumo.valor_unitario,
-          valorTotal: consumo.valor_total,
-          estoqueNome: consumo.estoque_nome,
-          usuarioNome: consumo.usuario_nome,
+          data: consumo.data || '',
+          produtoId: consumo.produto_id || '',
+          produtoNome: consumo.produto_nome || '',
+          loteNumero: consumo.lote_numero || '',
+          quantidade: consumo.quantidade || 0,
+          valorUnitario: consumo.valor_unitario || 0,
+          valorTotal: consumo.valor_total || 0,
+          estoqueNome: consumo.estoque_nome || '',
+          usuarioNome: consumo.usuario_nome || '',
           observacao: consumo.observacao || ''
         })),
         totalConsumos: data.total_consumos || 0,
         totalGastoProdutos: data.total_gasto_produtos || 0,
         ticketMedioProdutos: data.ticket_medio_produtos || 0,
-        ultimaCompraData: data.ultima_compra_data || ''
+        ultimaCompraData: data.ultima_compra_data || '',
+        // CAMPOS DE HISTORICO DE VISITAS (RECORRÊNCIA)
+        historicoVisitas: (data.historico_visitas || []).map(visita => ({
+          id: visita.id || '',
+          dataVisita: visita.data_visita || '',
+          medicoId: visita.medico_id || '',
+          medicoNome: visita.medico_nome || '',
+          especialidadeId: visita.especialidade_id || '',
+          especialidadeNome: visita.especialidade_nome || '',
+          procedimentoId: visita.procedimento_id || '',
+          procedimentoNome: visita.procedimento_nome || '',
+          tipoVisita: visita.tipo_visita || '',
+          valor: visita.valor || 0,
+          local: visita.local || '',
+          observacoes: visita.observacoes || '',
+          status: visita.status || '',
+          registradoPorId: visita.registrado_por_id || '',
+          registradoPorNome: visita.registrado_por_nome || '',
+          dataRegistro: visita.data_registro || '',
+          dataUltimaAlteracao: visita.data_ultima_alteracao || '',
+          tags: visita.tags || []
+        })),
+        totalVisitas: data.total_visitas || 0,
+        primeiraVisita: data.primeira_visita || '',
+        ultimaVisita: data.ultima_visita || '',
+        valorTotalVisitas: data.valor_total_visitas || 0,
+        mediaDiasEntreVisitas: data.media_dias_entre_visitas || 0,
+        // CAMPO CONSOLIDADO: Total gasto pelo paciente (visitas + produtos)
+        valorTotalGasto: data.valor_total_gasto || 0,
+        // CAMPO DE VISITAS POR ESPECIALIDADE (multiespecialidade)
+        visitasPorEspecialidade: data.visitas_por_especialidade || {}
       }
     }
     if (entity === 'tags') {
@@ -142,6 +185,38 @@ class FirebaseDataService {
         dataUltimaAlteracao: data.data_ultima_alteracao
       }
     }
+    if (entity === 'carteiras_gestao') {
+      const perf = data.performance || { totalReativados: 0, receitaGerada: 0, dataUltimaAtualizacao: '' }
+      return {
+        nomeCarteira: data.nome_carteira || '',
+        dataCriacao: data.data_criacao || new Date().toISOString(),
+        criadoPorId: data.criado_por_id || '',
+        criadoPorNome: data.criado_por_nome || '',
+        listaPacientes: data.lista_pacientes || [],
+        totalPacientes: data.total_pacientes || 0,
+        filtrosAplicados: data.filtros_aplicados || {},
+        status: data.status || 'ativa',
+        performance: {
+          totalReativados: perf.totalReativados || 0,
+          receitaGerada: perf.receitaGerada || 0,
+          dataUltimaAtualizacao: perf.dataUltimaAtualizacao || ''
+        }
+      }
+    }
+    if (entity === 'pos_consulta') {
+      return {
+        leadId: data.lead_id,
+        nomePaciente: data.nome_paciente,
+        dataConsulta: data.data_consulta,
+        resumoAtendimento: data.resumo_atendimento || '',
+        orientacoesPaciente: data.orientacoes_paciente || '',
+        proximoRetorno: data.proximo_retorno || '',
+        observacoesInternas: data.observacoes_internas || '',
+        criadoPorId: data.criado_por_id,
+        criadoPorNome: data.criado_por_nome,
+        dataCriacao: data.data_criacao || new Date().toISOString()
+      }
+    }
     return data
   }
 
@@ -163,7 +238,7 @@ class FirebaseDataService {
         motivo_nao_agendamento: data.motivoNaoAgendamento || data.motivo_nao_agendamento,
         outros_profissionais_agendados: data.outrosProfissionaisAgendados || data.outros_profissionais_agendados,
         quais_profissionais: data.quaisProfissionais || data.quais_profissionais,
-        
+
         // ✅ CORRIGIDO: Transformar array de outros profissionais COM valor_agendamento
         outros_profissionais: data.outrosProfissionais ? data.outrosProfissionais.map(prof => ({
           medico_id: prof.medicoId || prof.medico_id || '',
@@ -180,11 +255,16 @@ class FirebaseDataService {
           { medico_id: '', especialidade_id: '', procedimento_id: '', data_agendamento: '', valor_agendamento: '', local_agendado: '', ativo: false },
           { medico_id: '', especialidade_id: '', procedimento_id: '', data_agendamento: '', valor_agendamento: '', local_agendado: '', ativo: false }
         ],
-        
+
         pagou_reserva: data.pagouReserva || data.pagou_reserva,
         tipo_visita: data.tipoVisita || data.tipo_visita,
         valor_orcado: data.valorOrcado || data.valor_orcado,
         orcamento_fechado: data.orcamentoFechado || data.orcamento_fechado,
+        valor_consulta: data.valorConsulta || data.valor_consulta || '',
+        valor_taxa_reserva: data.valorTaxaReserva || data.valor_taxa_reserva || '',
+        valor_procedimento: data.valorProcedimento || data.valor_procedimento || '',
+        identificacao_procedimento: data.identificacaoProcedimento || data.identificacao_procedimento || '',
+        data_consulta_efetiva: data.dataConsultaEfetiva || data.data_consulta_efetiva || '',
         valor_fechado_parcial: data.valorFechadoParcial || data.valor_fechado_parcial || 0,
         followup1_realizado: data.followup1Realizado || data.followup1_realizado || false,
         followup1_data: data.followup1Data || data.followup1_data || '',
@@ -192,6 +272,8 @@ class FirebaseDataService {
         followup2_data: data.followup2Data || data.followup2_data || '',
         followup3_realizado: data.followup3Realizado || data.followup3_realizado || false,
         followup3_data: data.followup3Data || data.followup3_data || '',
+        nome_pai: data.nomePai || data.nome_pai || '',
+        nome_mae: data.nomeMae || data.nome_mae || '',
         observacao_geral: data.observacaoGeral || data.observacao_geral,
         perfil_comportamental_disc: data.perfilComportamentalDisc || data.perfil_comportamental_disc,
         status: data.status,
@@ -222,6 +304,36 @@ class FirebaseDataService {
         total_gasto_produtos: data.totalGastoProdutos || 0,
         ticket_medio_produtos: data.ticketMedioProdutos || 0,
         ultima_compra_data: data.ultimaCompraData || '',
+        // CAMPOS DE HISTORICO DE VISITAS (RECORRÊNCIA)
+        historico_visitas: (data.historicoVisitas || []).map(visita => ({
+          id: visita.id,
+          data_visita: visita.dataVisita,
+          medico_id: visita.medicoId,
+          medico_nome: visita.medicoNome,
+          especialidade_id: visita.especialidadeId,
+          especialidade_nome: visita.especialidadeNome,
+          procedimento_id: visita.procedimentoId,
+          procedimento_nome: visita.procedimentoNome,
+          tipo_visita: visita.tipoVisita,
+          valor: visita.valor,
+          local: visita.local,
+          observacoes: visita.observacoes,
+          status: visita.status,
+          registrado_por_id: visita.registradoPorId,
+          registrado_por_nome: visita.registradoPorNome,
+          data_registro: visita.dataRegistro,
+          data_ultima_alteracao: visita.dataUltimaAlteracao,
+          tags: visita.tags || []
+        })),
+        total_visitas: data.totalVisitas || 0,
+        primeira_visita: data.primeiraVisita || '',
+        ultima_visita: data.ultimaVisita || '',
+        valor_total_visitas: data.valorTotalVisitas || 0,
+        media_dias_entre_visitas: data.mediaDiasEntreVisitas || 0,
+        // CAMPO CONSOLIDADO: Total gasto pelo paciente (visitas + produtos)
+        valor_total_gasto: data.valorTotalGasto || 0,
+        // CAMPO DE VISITAS POR ESPECIALIDADE (multiespecialidade)
+        visitas_por_especialidade: data.visitasPorEspecialidade || data.visitas_por_especialidade || {},
         createdAt: data.createdAt,
         updatedAt: data.updatedAt
       }
@@ -259,6 +371,43 @@ class FirebaseDataService {
         updatedAt: data.updatedAt
       }
     }
+    if (entity === 'carteiras_gestao') {
+      return {
+        id: data.id,
+        nome_carteira: data.nomeCarteira || data.nome_carteira,
+        data_criacao: data.dataCriacao || data.data_criacao,
+        criado_por_id: data.criadoPorId || data.criado_por_id,
+        criado_por_nome: data.criadoPorNome || data.criado_por_nome,
+        lista_pacientes: data.listaPacientes || data.lista_pacientes || [],
+        total_pacientes: data.totalPacientes || data.total_pacientes || 0,
+        filtros_aplicados: data.filtrosAplicados || data.filtros_aplicados || {},
+        status: data.status || 'ativa',
+        performance: data.performance || {
+          totalReativados: 0,
+          receitaGerada: 0,
+          dataUltimaAtualizacao: null
+        },
+        createdAt: data.createdAt,
+        updatedAt: data.updatedAt
+      }
+    }
+    if (entity === 'pos_consulta') {
+      return {
+        id: data.id,
+        lead_id: data.leadId || data.lead_id,
+        nome_paciente: data.nomePaciente || data.nome_paciente,
+        data_consulta: data.dataConsulta || data.data_consulta,
+        resumo_atendimento: data.resumoAtendimento || data.resumo_atendimento || '',
+        orientacoes_paciente: data.orientacoesPaciente || data.orientacoes_paciente || '',
+        proximo_retorno: data.proximoRetorno || data.proximo_retorno || '',
+        observacoes_internas: data.observacoesInternas || data.observacoes_internas || '',
+        criado_por_id: data.criadoPorId || data.criado_por_id,
+        criado_por_nome: data.criadoPorNome || data.criado_por_nome,
+        data_criacao: data.dataCriacao || data.data_criacao,
+        createdAt: data.createdAt,
+        updatedAt: data.updatedAt
+      }
+    }
     return data
   }
 
@@ -273,10 +422,10 @@ class FirebaseDataService {
 
     try {
       console.log('🔄 Iniciando migração de campos de outros profissionais...')
-      
+
       const rawLeads = await firestoreService.getAll('leads')
       console.log(`📊 Encontrados ${rawLeads.length} leads para análise`)
-      
+
       let migrated = 0
       let total = rawLeads.length
       const errors = []
@@ -284,14 +433,14 @@ class FirebaseDataService {
       for (const lead of rawLeads) {
         try {
           // Verificar se precisa migrar
-          const needsMigration = !lead.outrosProfissionais || 
-                                !Array.isArray(lead.outrosProfissionais) ||
-                                lead.outrosProfissionais.length !== 5 ||
-                                lead.outrosProfissionais.some(prof => 
-                                  !prof.hasOwnProperty('procedimentoId') ||
-                                  !prof.hasOwnProperty('valorAgendamento') || // ✅ CORRIGIDO
-                                  !prof.hasOwnProperty('localAgendado')
-                                )
+          const needsMigration = !lead.outrosProfissionais ||
+            !Array.isArray(lead.outrosProfissionais) ||
+            lead.outrosProfissionais.length !== 5 ||
+            lead.outrosProfissionais.some(prof =>
+              !prof.hasOwnProperty('procedimentoId') ||
+              !prof.hasOwnProperty('valorAgendamento') || // ✅ CORRIGIDO
+              !prof.hasOwnProperty('localAgendado')
+            )
 
           if (needsMigration) {
             const updatedLead = {
@@ -317,7 +466,7 @@ class FirebaseDataService {
                 }
               })
             }
-            
+
             await firestoreService.update('leads', lead.id, updatedLead)
             migrated++
             console.log(`✅ Lead ${lead.nomePackiente || lead.nome_paciente} migrado com novos campos`)
@@ -361,10 +510,10 @@ class FirebaseDataService {
 
     try {
       console.log('🔄 Iniciando migração de rastreamento de usuário...')
-      
+
       const rawLeads = await firestoreService.getAll('leads')
       console.log(`📊 Encontrados ${rawLeads.length} leads para análise`)
-      
+
       let migrated = 0
       let total = rawLeads.length
       const errors = []
@@ -372,10 +521,10 @@ class FirebaseDataService {
 
       for (const lead of rawLeads) {
         try {
-          const needsUserTracking = !lead.hasOwnProperty('criadoPorId') || 
-                                   !lead.hasOwnProperty('criadoPorNome') ||
-                                   !lead.hasOwnProperty('alteradoPorId') ||
-                                   !lead.hasOwnProperty('alteradoPorNome')
+          const needsUserTracking = !lead.hasOwnProperty('criadoPorId') ||
+            !lead.hasOwnProperty('criadoPorNome') ||
+            !lead.hasOwnProperty('alteradoPorId') ||
+            !lead.hasOwnProperty('alteradoPorNome')
 
           if (needsUserTracking) {
             const updatedLead = {
@@ -388,7 +537,7 @@ class FirebaseDataService {
               alteradoPorEmail: lead.alteradoPorEmail || currentUser.email,
               dataUltimaAlteracao: lead.dataUltimaAlteracao || new Date().toISOString()
             }
-            
+
             await firestoreService.update('leads', lead.id, updatedLead)
             migrated++
             console.log(`✅ Lead ${lead.nomePackiente || lead.nome_paciente} migrado`)
@@ -428,10 +577,10 @@ class FirebaseDataService {
 
     try {
       console.log('🔄 Iniciando migração de tags...')
-      
+
       const rawLeads = await firestoreService.getAll('leads')
       console.log(`📊 Encontrados ${rawLeads.length} leads para análise`)
-      
+
       let migrated = 0
       let total = rawLeads.length
       const errors = []
@@ -443,7 +592,7 @@ class FirebaseDataService {
               ...lead,
               tags: []
             }
-            
+
             await firestoreService.update('leads', lead.id, updatedLead)
             migrated++
             console.log(`✅ Lead ${lead.nomePackiente || lead.nome_paciente} migrado`)
@@ -484,7 +633,7 @@ class FirebaseDataService {
     try {
       const firebaseData = this.transformToFirebase('tags', tagData)
       const result = await firestoreService.create('tags', firebaseData)
-      
+
       console.log('✅ Tag criada:', result.id)
       return { success: true, id: result.id }
     } catch (error) {
@@ -502,7 +651,7 @@ class FirebaseDataService {
     try {
       const firebaseData = this.transformToFirebase('tags', tagData)
       await firestoreService.update('tags', id, firebaseData)
-      
+
       console.log('✅ Tag atualizada:', id)
       return { success: true }
     } catch (error) {
@@ -519,10 +668,10 @@ class FirebaseDataService {
 
     try {
       console.log('🗑️ Excluindo tag:', id)
-      
+
       const rawLeads = await firestoreService.getAll('leads')
       let leadsUpdated = 0
-      
+
       for (const lead of rawLeads) {
         if (lead.tags && lead.tags.includes(id)) {
           const updatedTags = lead.tags.filter(tagId => tagId !== id)
@@ -533,9 +682,9 @@ class FirebaseDataService {
           leadsUpdated++
         }
       }
-      
+
       await firestoreService.delete('tags', id)
-      
+
       console.log(`✅ Tag excluída. ${leadsUpdated} leads atualizados.`)
       return { success: true, leadsUpdated }
     } catch (error) {
@@ -562,7 +711,7 @@ class FirebaseDataService {
       }
 
       await firestoreService.update('leads', leadId, updatedLead)
-      
+
       console.log('✅ Tags do lead atualizadas:', leadId)
       return { success: true }
     } catch (error) {
@@ -580,14 +729,14 @@ class FirebaseDataService {
     try {
       const rawLeads = await firestoreService.getAll('leads')
       const filteredLeads = []
-      
+
       for (const lead of rawLeads) {
         if (lead.tags && tagIds.some(tagId => lead.tags.includes(tagId))) {
           const transformedLead = this.transformFromFirebase('leads', lead)
           filteredLeads.push(transformedLead)
         }
       }
-      
+
       return filteredLeads
     } catch (error) {
       console.error('❌ Erro ao buscar leads por tags:', error)
@@ -629,7 +778,7 @@ class FirebaseDataService {
       }
 
       console.log('✅ Tags padrão criadas:', createdTags.length)
-      
+
       return {
         success: true,
         message: `${createdTags.length} tags padrão criadas com sucesso!`,
@@ -654,18 +803,18 @@ class FirebaseDataService {
 
     try {
       console.log('🚀 Iniciando migração de campos dos leads...')
-      
+
       const rawLeads = await firestoreService.getAll('leads')
       console.log(`📊 Encontrados ${rawLeads.length} leads para análise`)
-      
+
       let migratedCount = 0
       const errors = []
       const currentUser = this.getCurrentUserInfo()
-      
+
       for (const lead of rawLeads) {
         try {
           console.log(`🔍 Analisando lead: ${lead.nomePackiente || lead.nome_paciente} (ID: ${lead.id})`)
-          
+
           const needsMigration = (
             lead.valorFechadoParcial === undefined ||
             lead.followup1Realizado === undefined ||
@@ -680,16 +829,16 @@ class FirebaseDataService {
             !lead.outrosProfissionais ||
             !Array.isArray(lead.outrosProfissionais) ||
             lead.outrosProfissionais.length !== 5 ||
-            lead.outrosProfissionais.some(prof => 
+            lead.outrosProfissionais.some(prof =>
               !prof.hasOwnProperty('procedimentoId') ||
               !prof.hasOwnProperty('valorAgendamento') || // ✅ CORRIGIDO
               !prof.hasOwnProperty('localAgendado')
             )
           )
-          
+
           if (needsMigration) {
             console.log(`⚡ Migrando lead: ${lead.nomePackiente || lead.nome_paciente}`)
-            
+
             const updatedLead = {
               nomePackiente: lead.nomePackiente || lead.nome_paciente || '',
               telefone: lead.telefone || '',
@@ -712,7 +861,7 @@ class FirebaseDataService {
               perfilComportamentalDisc: lead.perfilComportamentalDisc || lead.perfil_comportamental_disc || '',
               status: lead.status || 'Sem Interação',
               dataRegistroContato: lead.dataRegistroContato || lead.data_registro_contato || new Date().toISOString(),
-              
+
               valorFechadoParcial: lead.valorFechadoParcial || lead.valor_fechado_parcial || 0,
               followup1Realizado: lead.followup1Realizado || lead.followup1_realizado || false,
               followup1Data: lead.followup1Data || lead.followup1_data || '',
@@ -720,28 +869,28 @@ class FirebaseDataService {
               followup2Data: lead.followup2Data || lead.followup2_data || '',
               followup3Realizado: lead.followup3Realizado || lead.followup3_realizado || false,
               followup3Data: lead.followup3Data || lead.followup3_data || '',
-              
+
               tags: lead.tags || [],
-              
+
               // ✅ CORRIGIDO: Campo outros profissionais com valorAgendamento
-              outrosProfissionais: lead.outrosProfissionais && Array.isArray(lead.outrosProfissionais) && lead.outrosProfissionais.length === 5 
+              outrosProfissionais: lead.outrosProfissionais && Array.isArray(lead.outrosProfissionais) && lead.outrosProfissionais.length === 5
                 ? lead.outrosProfissionais.map(prof => ({
-                    medicoId: prof.medicoId || '',
-                    especialidadeId: prof.especialidadeId || '',
-                    procedimentoId: prof.procedimentoId || '',
-                    dataAgendamento: prof.dataAgendamento || '',
-                    valorAgendamento: prof.valorAgendamento || prof.valor || '', // ✅ CORRIGIDO - aceita ambos
-                    localAgendado: prof.localAgendado || '',
-                    ativo: prof.ativo || false
-                  }))
+                  medicoId: prof.medicoId || '',
+                  especialidadeId: prof.especialidadeId || '',
+                  procedimentoId: prof.procedimentoId || '',
+                  dataAgendamento: prof.dataAgendamento || '',
+                  valorAgendamento: prof.valorAgendamento || prof.valor || '', // ✅ CORRIGIDO - aceita ambos
+                  localAgendado: prof.localAgendado || '',
+                  ativo: prof.ativo || false
+                }))
                 : [
-                    { medicoId: '', especialidadeId: '', procedimentoId: '', dataAgendamento: '', valorAgendamento: '', localAgendado: '', ativo: false },
-                    { medicoId: '', especialidadeId: '', procedimentoId: '', dataAgendamento: '', valorAgendamento: '', localAgendado: '', ativo: false },
-                    { medicoId: '', especialidadeId: '', procedimentoId: '', dataAgendamento: '', valorAgendamento: '', localAgendado: '', ativo: false },
-                    { medicoId: '', especialidadeId: '', procedimentoId: '', dataAgendamento: '', valorAgendamento: '', localAgendado: '', ativo: false },
-                    { medicoId: '', especialidadeId: '', procedimentoId: '', dataAgendamento: '', valorAgendamento: '', localAgendado: '', ativo: false }
-                  ],
-              
+                  { medicoId: '', especialidadeId: '', procedimentoId: '', dataAgendamento: '', valorAgendamento: '', localAgendado: '', ativo: false },
+                  { medicoId: '', especialidadeId: '', procedimentoId: '', dataAgendamento: '', valorAgendamento: '', localAgendado: '', ativo: false },
+                  { medicoId: '', especialidadeId: '', procedimentoId: '', dataAgendamento: '', valorAgendamento: '', localAgendado: '', ativo: false },
+                  { medicoId: '', especialidadeId: '', procedimentoId: '', dataAgendamento: '', valorAgendamento: '', localAgendado: '', ativo: false },
+                  { medicoId: '', especialidadeId: '', procedimentoId: '', dataAgendamento: '', valorAgendamento: '', localAgendado: '', ativo: false }
+                ],
+
               criadoPorId: lead.criadoPorId || currentUser.id,
               criadoPorNome: lead.criadoPorNome || currentUser.nome,
               criadoPorEmail: lead.criadoPorEmail || currentUser.email,
@@ -750,15 +899,15 @@ class FirebaseDataService {
               alteradoPorEmail: lead.alteradoPorEmail || currentUser.email,
               dataUltimaAlteracao: lead.dataUltimaAlteracao || new Date().toISOString()
             }
-            
+
             await firestoreService.update('leads', lead.id, updatedLead)
             migratedCount++
-            
+
             console.log(`✅ Lead ${lead.nomePackiente || lead.nome_paciente} migrado com sucesso`)
           } else {
             console.log(`⏭️ Lead ${lead.nomePackiente || lead.nome_paciente} já possui todos os campos`)
           }
-          
+
         } catch (leadError) {
           console.error(`❌ Erro ao migrar lead ${lead.id}:`, leadError)
           errors.push({
@@ -768,17 +917,17 @@ class FirebaseDataService {
           })
         }
       }
-      
+
       console.log(`🎉 Migração concluída!`)
       console.log(`📈 Estatísticas:`)
       console.log(`   - Total de leads: ${rawLeads.length}`)
       console.log(`   - Leads migrados: ${migratedCount}`)
       console.log(`   - Erros: ${errors.length}`)
-      
+
       if (errors.length > 0) {
         console.log(`⚠️ Erros encontrados:`, errors)
       }
-      
+
       return {
         success: true,
         message: `Migração concluída! ${migratedCount} leads foram atualizados.`,
@@ -789,7 +938,7 @@ class FirebaseDataService {
         },
         errors
       }
-      
+
     } catch (error) {
       console.error('❌ Erro durante a migração:', error)
       return {
@@ -797,6 +946,62 @@ class FirebaseDataService {
         message: `Erro durante a migração: ${error.message}`,
         error
       }
+    }
+  }
+
+  async migrateLeadsNewFields() {
+    try {
+      console.log('🔄 Iniciando migração de novos campos...')
+      const leads = await this.getAll('leads')
+      let migrated = 0
+      let errors = 0
+
+      for (const lead of leads) {
+        try {
+          const needsMigration =
+            lead.data_consulta_efetiva === undefined ||
+            lead.valor_consulta === undefined ||
+            lead.valor_taxa_reserva === undefined ||
+            lead.valor_procedimento === undefined ||
+            lead.identificacao_procedimento === undefined ||
+            lead.visitas_por_especialidade === undefined
+
+          if (!needsMigration) continue
+
+          const updates = {}
+          if (lead.data_consulta_efetiva === undefined) updates.data_consulta_efetiva = ''
+          if (lead.valor_consulta === undefined) updates.valor_consulta = ''
+          if (lead.valor_taxa_reserva === undefined) updates.valor_taxa_reserva = ''
+          if (lead.valor_procedimento === undefined) updates.valor_procedimento = ''
+          if (lead.identificacao_procedimento === undefined) updates.identificacao_procedimento = ''
+          if (lead.visitas_por_especialidade === undefined) updates.visitas_por_especialidade = {}
+
+          // Adicionar tags vazias a visitas sem tags
+          if (lead.historico_visitas && lead.historico_visitas.length > 0) {
+            const needsTagMigration = lead.historico_visitas.some(v => v.tags === undefined)
+            if (needsTagMigration) {
+              updates.historico_visitas = lead.historico_visitas.map(v => ({
+                ...v,
+                tags: v.tags || []
+              }))
+            }
+          }
+
+          if (Object.keys(updates).length > 0) {
+            await this.update('leads', lead.id, updates)
+            migrated++
+          }
+        } catch (err) {
+          console.error(`❌ Erro ao migrar lead ${lead.nome_paciente}:`, err)
+          errors++
+        }
+      }
+
+      console.log(`✅ Migração concluída: ${migrated} migrados, ${errors} erros, ${leads.length} total`)
+      return { total: leads.length, migrated, errors }
+    } catch (err) {
+      console.error('❌ Erro na migração:', err)
+      throw err
     }
   }
 
@@ -819,10 +1024,10 @@ class FirebaseDataService {
 
     if (!localStorage.getItem('younv_medicos')) {
       const medicos = [
-        { 
-          id: '1', 
-          nome: 'Dr. João Silva', 
-          crm: '12345-SP', 
+        {
+          id: '1',
+          nome: 'Dr. João Silva',
+          crm: '12345-SP',
           telefone: '(11) 99999-9999',
           email: 'joao@clinica.com',
           especialidade_id: '1',
@@ -835,11 +1040,11 @@ class FirebaseDataService {
 
     if (!localStorage.getItem('younv_procedimentos')) {
       const procedimentos = [
-        { 
-          id: '1', 
-          nome: 'Consulta Dermatológica', 
-          valor: 200, 
-          duracao: 30, 
+        {
+          id: '1',
+          nome: 'Consulta Dermatológica',
+          valor: 200,
+          duracao: 30,
           categoria: 'Consulta',
           especialidade_id: '1',
           ativo: true
@@ -850,6 +1055,18 @@ class FirebaseDataService {
 
     if (!localStorage.getItem('younv_leads')) {
       localStorage.setItem('younv_leads', JSON.stringify([]))
+    }
+    if (!localStorage.getItem('younv_carteiras_gestao')) {
+      localStorage.setItem('younv_carteiras_gestao', JSON.stringify([]))
+    }
+    if (!localStorage.getItem('younv_tags')) {
+      localStorage.setItem('younv_tags', JSON.stringify([]))
+    }
+    if (!localStorage.getItem('younv_pos_consulta')) {
+      localStorage.setItem('younv_pos_consulta', JSON.stringify([]))
+    }
+    if (!localStorage.getItem('younv_lembretes')) {
+      localStorage.setItem('younv_lembretes', JSON.stringify([]))
     }
   }
 
@@ -863,12 +1080,7 @@ class FirebaseDataService {
           orderField = 'dataLembrete'
         }
         const data = await firestoreService.getAll(this.getCollectionName(entity), orderField, 'desc')
-        console.log(`Dados brutos do Firebase para ${entity}:`, data)
-        
-        const transformedData = data.map(item => this.transformFromFirebase(entity, item))
-        console.log(`Dados transformados para ${entity}:`, transformedData)
-        
-        return transformedData
+        return data.map(item => this.transformFromFirebase(entity, item))
       } catch (error) {
         console.error('Erro ao buscar dados do Firebase, usando localStorage como fallback')
         return this.getFromLocalStorage(entity)
@@ -911,11 +1123,7 @@ class FirebaseDataService {
         }
 
         const firebaseData = this.transformToFirebase(entity, itemWithUserInfo)
-        console.log(`Criando no Firebase - ${entity}:`, firebaseData)
-        
         const result = await firestoreService.create(this.getCollectionName(entity), firebaseData)
-        console.log(`Resultado da criação no Firebase:`, result)
-        
         return this.transformFromFirebase(entity, result)
       } catch (error) {
         console.error('Erro ao criar no Firebase, usando localStorage como fallback')
@@ -929,58 +1137,37 @@ class FirebaseDataService {
   async update(entity, id, updatedItem) {
     if (this.useFirebase) {
       try {
-        console.log(`🔄 INICIANDO atualização de ${entity} ${id}`)
-        console.log('📥 Dados recebidos para atualização:', updatedItem)
-
-        const currentFirebaseData = await firestoreService.getById(this.getCollectionName(entity), id)
-        if (!currentFirebaseData) {
-          throw new Error(`${entity} com ID ${id} não encontrado no Firebase`)
-        }
-
-        console.log('📋 Dados atuais no Firebase:', currentFirebaseData)
+        log(`🔄 update ${entity} ${id}`)
 
         const currentUser = this.getCurrentUserInfo()
-        
         const updatedFirebaseData = this.transformToFirebase(entity, updatedItem)
-        console.log('🔄 Dados de atualização transformados para Firebase:', updatedFirebaseData)
-        
+
+        // updateDoc do Firestore só substitui os campos enviados — não precisamos baixar
+        // o doc atual antes (eliminado 1 round-trip). Apenas garantimos que campos de
+        // criação não sejam sobrescritos: omitimos eles do payload.
         const finalUpdateData = {
-          ...currentFirebaseData,
           ...updatedFirebaseData,
-          createdAt: currentFirebaseData.createdAt,
           ...(entity === 'leads' && {
-            criadoPorId: currentFirebaseData.criadoPorId || currentUser.id,
-            criadoPorNome: currentFirebaseData.criadoPorNome || currentUser.nome,
-            criadoPorEmail: currentFirebaseData.criadoPorEmail || currentUser.email,
-            dataRegistroContato: currentFirebaseData.dataRegistroContato || new Date().toISOString(),
             alteradoPorId: currentUser.id,
             alteradoPorNome: currentUser.nome,
             alteradoPorEmail: currentUser.email,
             dataUltimaAlteracao: new Date().toISOString()
           })
         }
-
-        console.log('🎯 Dados finais para atualização no Firebase:', finalUpdateData)
+        // Não sobrescrever campos imutáveis de criação
+        delete finalUpdateData.createdAt
+        if (entity === 'leads') {
+          delete finalUpdateData.criadoPorId
+          delete finalUpdateData.criadoPorNome
+          delete finalUpdateData.criadoPorEmail
+          delete finalUpdateData.dataRegistroContato
+        }
 
         const result = await firestoreService.update(this.getCollectionName(entity), id, finalUpdateData)
-        
-        console.log('✅ Atualização no Firebase concluída:', result)
-        
-        const finalResult = this.transformFromFirebase(entity, result)
-        console.log('📤 Dados retornados para o frontend:', finalResult)
-        
-        return finalResult
-        
+        return this.transformFromFirebase(entity, { ...result, id })
       } catch (error) {
-        console.error(`❌ ERRO CRÍTICO ao atualizar ${entity} no Firebase:`, {
-          error: error.message,
-          stack: error.stack,
-          entity,
-          id,
-          updatedItem
-        })
-        
-        console.log('🔄 Tentando fallback para localStorage...')
+        console.error(`❌ Erro ao atualizar ${entity} no Firebase:`, error.message)
+        log('🔄 Fallback para localStorage...')
         return this.updateInLocalStorage(entity, id, updatedItem)
       }
     } else {
@@ -1005,7 +1192,7 @@ class FirebaseDataService {
     const key = `younv_${entity}`
     const data = localStorage.getItem(key)
     const items = data ? JSON.parse(data) : []
-    
+
     if (entity === 'leads') {
       return items.sort((a, b) => {
         const dateA = new Date(a.data_registro_contato || a.createdAt || 0)
@@ -1013,14 +1200,14 @@ class FirebaseDataService {
         return dateB - dateA
       })
     }
-    
+
     return items
   }
 
   createInLocalStorage(entity, item) {
     const items = this.getFromLocalStorage(entity)
     const currentUser = this.getCurrentUserInfo()
-    
+
     const newItem = {
       ...item,
       id: Date.now().toString(),
@@ -1052,8 +1239,8 @@ class FirebaseDataService {
     if (index !== -1) {
       const currentUser = this.getCurrentUserInfo()
       const currentItem = items[index]
-      
-      items[index] = { 
+
+      items[index] = {
         ...currentItem,
         ...updatedItem,
         criado_por_id: currentItem.criado_por_id,
@@ -1066,7 +1253,7 @@ class FirebaseDataService {
         data_ultima_alteracao: new Date().toISOString()
       }
       localStorage.setItem(`younv_${entity}`, JSON.stringify(items))
-      
+
       console.log(`✅ ${entity} ${id} atualizado no localStorage preservando dados originais`)
       return items[index]
     }

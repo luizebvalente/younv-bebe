@@ -50,6 +50,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import html2canvas from 'html2canvas'
 import firebaseDataService from '@/services/firebaseDataService'
+import { STATUS_COLORS } from '@/constants/crm'
 
 const Relatorios = () => {
   const printRef = useRef(null)
@@ -81,6 +82,13 @@ const Relatorios = () => {
   })
   const [filteredByPeriodLeads, setFilteredByPeriodLeads] = useState([])
   
+  // Estado para tipo de filtro de data
+  const [dateFilterType, setDateFilterType] = useState('registro') // 'registro' or 'consulta'
+
+  // Estados para filtro por procedimento
+  const [selectedProcedimentoFilter, setSelectedProcedimentoFilter] = useState('all')
+  const [procedimentos, setProcedimentos] = useState([])
+
   // Estados para filtro por tags
   const [showTagFilter, setShowTagFilter] = useState(false)
   const [selectedTagsFilter, setSelectedTagsFilter] = useState([])
@@ -153,7 +161,7 @@ const Relatorios = () => {
     } else {
       setFilteredByPeriodLeads(leads)
     }
-  }, [periodFilter.startDate, periodFilter.endDate, leads])
+  }, [periodFilter.startDate, periodFilter.endDate, leads, dateFilterType])
 
   // Aplicar filtros combinados (período + tags + médico)
   const getFilteredLeads = () => {
@@ -176,6 +184,14 @@ const Relatorios = () => {
       filtered = filtered.filter(lead => lead.medico_agendado_id === selectedMedicoFilter)
     }
 
+    // Filtro por procedimento
+    if (selectedProcedimentoFilter && selectedProcedimentoFilter !== 'all') {
+      filtered = filtered.filter(lead =>
+        lead.procedimento_agendado_id === selectedProcedimentoFilter ||
+        (lead.outros_profissionais && lead.outros_profissionais.some(p => p.procedimento_id === selectedProcedimentoFilter && p.ativo))
+      )
+    }
+
     return filtered
   }
 
@@ -184,18 +200,20 @@ const Relatorios = () => {
       setLoading(true)
       setError(null)
       
-      const [leadsData, medicosData, especialidadesData, tagsData] = await Promise.all([
+      const [leadsData, medicosData, especialidadesData, tagsData, procData] = await Promise.all([
         firebaseDataService.getAll('leads'),
         firebaseDataService.getAll('medicos'),
         firebaseDataService.getAll('especialidades'),
-        firebaseDataService.getAll('tags')
+        firebaseDataService.getAll('tags'),
+        firebaseDataService.getAll('procedimentos')
       ])
-      
+
       setLeads(leadsData)
       setFilteredByPeriodLeads(leadsData)
       setMedicos(medicosData)
       setEspecialidades(especialidadesData)
       setTags(tagsData)
+      setProcedimentos(procData)
     } catch (err) {
       console.error('Erro ao carregar dados dos relatórios:', err)
       setError('Erro ao carregar dados dos relatórios. Tente novamente.')
@@ -217,7 +235,10 @@ const Relatorios = () => {
     end.setHours(23, 59, 59, 999)
     
     const filtered = leads.filter(lead => {
-      const leadDate = new Date(lead.data_registro_contato)
+      const dateField = dateFilterType === 'consulta'
+        ? (lead.data_consulta_efetiva || lead.data_registro_contato)
+        : lead.data_registro_contato
+      const leadDate = new Date(dateField)
       return leadDate >= start && leadDate <= end
     })
     
@@ -256,6 +277,7 @@ const Relatorios = () => {
   // ✅ NOVO: Limpar todos os filtros
   const clearAllFilters = () => {
     setSelectedMedicoFilter('all')
+    setSelectedProcedimentoFilter('all')
     setSelectedTagsFilter([])
     clearPeriodFilter()
   }
@@ -1108,6 +1130,58 @@ const Relatorios = () => {
 
   const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8']
 
+  // === CÁLCULOS DE INVESTIMENTO TOTAL NA CLÍNICA ===
+  const totalProcedimentos = leadsToAnalyze
+    .filter(l => l.status === 'Convertido')
+    .reduce((sum, l) => sum + (l.valor_orcado || 0), 0)
+
+  const totalProdutos = leadsToAnalyze
+    .reduce((sum, l) => sum + (l.total_gasto_produtos || 0), 0)
+
+  const totalGeralInvestido = totalProcedimentos + totalProdutos
+
+  // Evolução mensal do investimento (últimos 12 meses)
+  const investimentoMensal = (() => {
+    const meses = {}
+    const hoje = new Date()
+
+    // Inicializar últimos 12 meses
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(hoje.getFullYear(), hoje.getMonth() - i, 1)
+      const chave = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+      const label = `${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`
+      meses[chave] = { mes: label, procedimentos: 0, produtos: 0, chave }
+    }
+
+    leadsToAnalyze.forEach(lead => {
+      if (!lead.data_registro_contato) return
+      const data = new Date(lead.data_registro_contato)
+      const chave = `${data.getFullYear()}-${String(data.getMonth() + 1).padStart(2, '0')}`
+
+      if (meses[chave]) {
+        if (lead.status === 'Convertido') {
+          meses[chave].procedimentos += (lead.valor_orcado || 0)
+        }
+        meses[chave].produtos += (lead.total_gasto_produtos || 0)
+      }
+    })
+
+    return Object.values(meses).sort((a, b) => a.chave.localeCompare(b.chave))
+  })()
+
+  // Top 10 pacientes por valor investido
+  const top10Investimento = leadsToAnalyze
+    .map(lead => ({
+      nome: lead.nome_paciente,
+      telefone: lead.telefone,
+      procedimentos: lead.status === 'Convertido' ? (lead.valor_orcado || 0) : 0,
+      produtos: lead.total_gasto_produtos || 0,
+      total: (lead.status === 'Convertido' ? (lead.valor_orcado || 0) : 0) + (lead.total_gasto_produtos || 0)
+    }))
+    .filter(p => p.total > 0)
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 10)
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -1565,8 +1639,23 @@ const Relatorios = () => {
                 </SelectContent>
               </Select>
             </div>
-            
-            {(selectedMedicoFilter !== 'all' || selectedTagsFilter.length > 0 || (periodFilter.startDate && periodFilter.endDate)) && (
+
+            <div className="space-y-1">
+              <label className="text-xs text-gray-500">Procedimento</label>
+              <Select value={selectedProcedimentoFilter} onValueChange={setSelectedProcedimentoFilter}>
+                <SelectTrigger className="h-8 text-sm">
+                  <SelectValue placeholder="Todos" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos os procedimentos</SelectItem>
+                  {procedimentos.filter(p => p.ativo !== false).map(p => (
+                    <SelectItem key={p.id} value={p.id}>{p.nome}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {(selectedMedicoFilter !== 'all' || selectedProcedimentoFilter !== 'all' || selectedTagsFilter.length > 0 || (periodFilter.startDate && periodFilter.endDate)) && (
               <Button
                 variant="outline"
                 size="sm"
@@ -1612,6 +1701,21 @@ const Relatorios = () => {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
+            <div className="flex items-center gap-2 text-sm">
+              <span className="text-gray-500">Filtrar por:</span>
+              <button
+                onClick={() => setDateFilterType('registro')}
+                className={`px-2 py-1 rounded text-xs ${dateFilterType === 'registro' ? 'bg-blue-100 text-blue-800 font-medium' : 'text-gray-500'}`}
+              >
+                Data de Registro
+              </button>
+              <button
+                onClick={() => setDateFilterType('consulta')}
+                className={`px-2 py-1 rounded text-xs ${dateFilterType === 'consulta' ? 'bg-blue-100 text-blue-800 font-medium' : 'text-gray-500'}`}
+              >
+                Data da Consulta
+              </button>
+            </div>
             <div className="flex flex-wrap gap-2">
               <Button
                 size="sm"
@@ -2046,6 +2150,122 @@ const Relatorios = () => {
             </p>
           </CardContent>
         </Card>
+      </div>
+
+      {/* === SEÇÃO: INVESTIMENTO TOTAL NA CLÍNICA === */}
+      <div className="space-y-4">
+        <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+          <DollarSign className="h-5 w-5 text-emerald-600" />
+          Investimento Total na Clínica
+        </h2>
+
+        {/* Cards de resumo */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <Card className="border-0 shadow-lg bg-gradient-to-br from-blue-50 to-blue-100">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium text-gray-700">Total em Procedimentos</CardTitle>
+              <TrendingUp className="h-4 w-4 text-blue-600" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-blue-900">{formatCurrency(totalProcedimentos)}</div>
+              <p className="text-xs text-gray-500 mt-1">Leads convertidos</p>
+            </CardContent>
+          </Card>
+
+          <Card className="border-0 shadow-lg bg-gradient-to-br from-amber-50 to-amber-100">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium text-gray-700">Total em Produtos</CardTitle>
+              <DollarSign className="h-4 w-4 text-amber-600" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-amber-900">{formatCurrency(totalProdutos)}</div>
+              <p className="text-xs text-gray-500 mt-1">Consumo de estoque</p>
+            </CardContent>
+          </Card>
+
+          <Card className="border-0 shadow-lg bg-gradient-to-br from-emerald-50 to-emerald-100">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium text-gray-700">Total Geral Investido</CardTitle>
+              <DollarSign className="h-4 w-4 text-emerald-600" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-emerald-900">{formatCurrency(totalGeralInvestido)}</div>
+              <p className="text-xs text-gray-500 mt-1">Procedimentos + Produtos</p>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Gráfico de evolução mensal */}
+        <Card className="border-0 shadow-lg">
+          <CardHeader>
+            <CardTitle className="flex items-center text-lg font-semibold">
+              <TrendingUp className="h-5 w-5 mr-2 text-emerald-600" />
+              Evolução Mensal do Investimento (12 meses)
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={350}>
+              <BarChart data={investimentoMensal}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                <XAxis dataKey="mes" tick={{ fontSize: 11 }} />
+                <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `R$${(v / 1000).toFixed(0)}k`} />
+                <Tooltip
+                  contentStyle={{ backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}
+                  formatter={(value) => [formatCurrency(value)]}
+                />
+                <Legend />
+                <Bar dataKey="procedimentos" name="Procedimentos" fill="#3b82f6" stackId="a" radius={[0, 0, 0, 0]} />
+                <Bar dataKey="produtos" name="Produtos" fill="#f59e0b" stackId="a" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+
+        {/* Top 10 Pacientes por Valor Investido */}
+        {top10Investimento.length > 0 && (
+          <Card className="border-0 shadow-lg">
+            <CardHeader>
+              <CardTitle className="flex items-center text-lg font-semibold">
+                <Users className="h-5 w-5 mr-2 text-emerald-600" />
+                Top 10 Pacientes por Valor Investido
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b bg-gray-50">
+                      <th className="p-3 text-left">#</th>
+                      <th className="p-3 text-left">Nome</th>
+                      <th className="p-3 text-left">Telefone</th>
+                      <th className="p-3 text-right">Procedimentos</th>
+                      <th className="p-3 text-right">Produtos</th>
+                      <th className="p-3 text-right font-bold">Total Investido</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {top10Investimento.map((paciente, index) => (
+                      <tr key={index} className="border-b hover:bg-gray-50">
+                        <td className="p-3">
+                          <span className={`w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-bold ${
+                            index === 0 ? 'bg-amber-500' : index === 1 ? 'bg-gray-400' : index === 2 ? 'bg-amber-700' : 'bg-gray-300'
+                          }`}>
+                            {index + 1}
+                          </span>
+                        </td>
+                        <td className="p-3 font-medium">{paciente.nome}</td>
+                        <td className="p-3 text-gray-600">{paciente.telefone}</td>
+                        <td className="p-3 text-right text-blue-600">{formatCurrency(paciente.procedimentos)}</td>
+                        <td className="p-3 text-right text-amber-600">{formatCurrency(paciente.produtos)}</td>
+                        <td className="p-3 text-right font-bold text-emerald-600">{formatCurrency(paciente.total)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        )}
       </div>
 
       {/* GRÁFICOS DE TAGS */}

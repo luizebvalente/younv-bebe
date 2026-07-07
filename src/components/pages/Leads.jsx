@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import { useLocation } from 'react-router-dom'
-import { Plus, Search, Filter, Edit, Trash2, Users, Calendar, DollarSign, TrendingUp, Check, RefreshCw, X, Tag, Settings, AlertTriangle, User, Clock, CalendarDays, Download, ChevronLeft, ChevronRight, UserPlus, Bell, ShoppingBag } from 'lucide-react'
+import { Plus, Search, Filter, Edit, Trash2, Users, Calendar, DollarSign, TrendingUp, Check, RefreshCw, X, Tag, Settings, AlertTriangle, User, Clock, CalendarDays, Download, ChevronLeft, ChevronRight, UserPlus, Bell, ShoppingBag, History } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -15,6 +15,8 @@ import { useAuth } from '@/contexts/AuthContext'
 import firebaseDataService from '@/services/firebaseDataService'
 import FunilKanban from '@/components/pages/FunilKanban'
 import HistoricoConsumoPaciente from '@/components/pages/HistoricoConsumoPaciente'
+import HistoricoVisitas from '@/components/pages/HistoricoVisitas'
+import { LEAD_STATUSES, CANAIS_CONTATO, DISC_PROFILES, STATUS_COLORS, TAG_CATEGORIES } from '@/constants/crm'
 
 
 // FUNÇÃO UTILITÁRIA PARA DEBOUNCE
@@ -37,7 +39,7 @@ export default function Leads() {
   const [especialidades, setEspecialidades] = useState([])
   const [procedimentos, setProcedimentos] = useState([])
   const [tags, setTags] = useState([])
-  
+
   // ESTADOS DE UI
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -48,9 +50,10 @@ export default function Leads() {
   const [existingPatient, setExistingPatient] = useState(null)
   const [activeTab, setActiveTab] = useState('leads')
   const [showKanban, setShowKanban] = useState(false)
-  
+
   // ESTADOS DE FILTROS
   const [searchTerm, setSearchTerm] = useState('')
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState('Todos')
   const [createdByFilter, setCreatedByFilter] = useState('Todos')
   const [alteredByFilter, setAlteredByFilter] = useState('Todos')
@@ -62,12 +65,12 @@ export default function Leads() {
     quickFilter: ''
   })
   const [filteredByDateLeads, setFilteredByDateLeads] = useState([])
-  
+
   // ESTADOS DE PAGINAÇÃO
   const [currentPage, setCurrentPage] = useState(1)
   const [itemsPerPage, setItemsPerPage] = useState(10)
   const [totalPages, setTotalPages] = useState(1)
-  
+
   // ESTADOS PARA TAGS
   const [isTagDialogOpen, setIsTagDialogOpen] = useState(false)
   const [editingTag, setEditingTag] = useState(null)
@@ -87,13 +90,15 @@ export default function Leads() {
     descricao: '',
     observacoes: ''
   })
-  
+
   // FORMULÁRIO OTIMIZADO COM NOVOS CAMPOS PARA OUTROS PROFISSIONAIS
   const [formData, setFormData] = useState(() => ({
     nome_paciente: '',
     telefone: '',
     data_nascimento: '',
     email: '',
+    nome_pai: '',
+    nome_mae: '',
     canal_contato: '',
     solicitacao_paciente: '',
     medico_agendado_id: '',
@@ -125,12 +130,17 @@ export default function Leads() {
     followup2_data: '',
     followup3_realizado: false,
     followup3_data: '',
+    data_consulta_efetiva: '',
+    valor_consulta: '',
+    valor_taxa_reserva: '',
+    valor_procedimento: '',
+    identificacao_procedimento: '',
     tags: []
   }))
 
 
 
-  
+
   // Hooks
   const { user } = useAuth()
   const location = useLocation()
@@ -143,12 +153,12 @@ export default function Leads() {
         ...newOutrosProfissionais[index],
         [field]: value
       }
-      
+
       // Se estiver preenchendo médico ou especialidade, ativar o slot
       if ((field === 'medico_id' || field === 'especialidade_id') && value) {
         newOutrosProfissionais[index].ativo = true
       }
-      
+
       // Se limpar médico E especialidade, desativar o slot
       if (field === 'medico_id' && !value && !newOutrosProfissionais[index].especialidade_id) {
         newOutrosProfissionais[index].ativo = false
@@ -156,7 +166,7 @@ export default function Leads() {
       if (field === 'especialidade_id' && !value && !newOutrosProfissionais[index].medico_id) {
         newOutrosProfissionais[index].ativo = false
       }
-      
+
       return {
         ...prev,
         outros_profissionais: newOutrosProfissionais,
@@ -178,13 +188,13 @@ export default function Leads() {
   const removerOutroProfissional = useCallback((index) => {
     setFormData(prev => {
       const newOutrosProfissionais = [...prev.outros_profissionais]
-      newOutrosProfissionais[index] = { 
-        medico_id: '', 
-        especialidade_id: '', 
-        data_agendamento: '', 
-        ativo: false 
+      newOutrosProfissionais[index] = {
+        medico_id: '',
+        especialidade_id: '',
+        data_agendamento: '',
+        ativo: false
       }
-      
+
       return {
         ...prev,
         outros_profissionais: newOutrosProfissionais,
@@ -194,33 +204,35 @@ export default function Leads() {
   }, [])
 
   // MEMOIZAÇÕES PARA PERFORMANCE - FILTROS APLICADOS SEM PAGINAÇÃO
+  // Pré-calcula o termo de busca lowercased uma única vez por render
   const filteredLeads = useMemo(() => {
     const baseLeads = showDateFilter ? filteredByDateLeads : leads
-    
-    const filtered = baseLeads.filter(lead => {
-      const matchesSearch = lead.nome_paciente?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                           lead.telefone?.includes(searchTerm) ||
-                           lead.email?.toLowerCase().includes(searchTerm.toLowerCase())
-      const matchesStatus = statusFilter === 'Todos' || lead.status === statusFilter
-      const matchesCreator = createdByFilter === 'Todos' || lead.criado_por_nome === createdByFilter
-      const matchesAltered = alteredByFilter === 'Todos' || lead.alterado_por_nome === alteredByFilter
-      const matchesTags = selectedTagsFilter.length === 0 || 
-                         selectedTagsFilter.every(tagId => lead.tags?.includes(tagId))
-      
-      return matchesSearch && matchesStatus && matchesCreator && matchesAltered && matchesTags
-    })
+    const term = (debouncedSearchTerm || '').toLowerCase()
+    const hasSearch = term.length > 0
 
-    // Calcular total de páginas baseado nos leads filtrados
-    const pages = Math.ceil(filtered.length / itemsPerPage)
-    setTotalPages(pages || 1)
-    
-    // Se a página atual é maior que o total de páginas, voltar para a primeira
-    if (currentPage > pages && pages > 0) {
-      setCurrentPage(1)
-    }
-    
-    return filtered
-  }, [leads, filteredByDateLeads, showDateFilter, searchTerm, statusFilter, createdByFilter, alteredByFilter, selectedTagsFilter, itemsPerPage, currentPage])
+    return baseLeads.filter(lead => {
+      // Curto-circuito: filtros baratos primeiro
+      if (statusFilter !== 'Todos' && lead.status !== statusFilter) return false
+      if (createdByFilter !== 'Todos' && lead.criado_por_nome !== createdByFilter) return false
+      if (alteredByFilter !== 'Todos' && lead.alterado_por_nome !== alteredByFilter) return false
+      if (selectedTagsFilter.length > 0 && !selectedTagsFilter.every(tagId => lead.tags?.includes(tagId))) return false
+
+      if (hasSearch) {
+        const nome = lead.nome_paciente ? lead.nome_paciente.toLowerCase() : ''
+        const email = lead.email ? lead.email.toLowerCase() : ''
+        const tel = lead.telefone || ''
+        if (!nome.includes(term) && !email.includes(term) && !tel.includes(term)) return false
+      }
+      return true
+    })
+  }, [leads, filteredByDateLeads, showDateFilter, debouncedSearchTerm, statusFilter, createdByFilter, alteredByFilter, selectedTagsFilter])
+
+  // Side-effects extraídos do useMemo (evita renders extras)
+  useEffect(() => {
+    const pages = Math.ceil(filteredLeads.length / itemsPerPage) || 1
+    setTotalPages(pages)
+    if (currentPage > pages) setCurrentPage(1)
+  }, [filteredLeads.length, itemsPerPage, currentPage])
 
   // LEADS PAGINADOS - APENAS OS VISÍVEIS NA PÁGINA ATUAL
   const paginatedLeads = useMemo(() => {
@@ -234,7 +246,7 @@ export default function Leads() {
     agendados: filteredLeads.filter(lead => lead.status === 'Agendado').length,
     convertidos: filteredLeads.filter(lead => lead.status === 'Convertido').length,
     valorTotal: filteredLeads.filter(lead => lead.status === 'Convertido')
-                    .reduce((sum, lead) => sum + (lead.valor_orcado || 0), 0)
+      .reduce((sum, lead) => sum + (lead.valor_orcado || 0), 0)
   }), [filteredLeads])
 
   const uniqueCreators = useMemo(() => {
@@ -281,7 +293,7 @@ export default function Leads() {
   // Resetar página quando filtros mudarem
   useEffect(() => {
     setCurrentPage(1)
-  }, [searchTerm, statusFilter, createdByFilter, alteredByFilter, selectedTagsFilter, showDateFilter, dateFilter])
+  }, [debouncedSearchTerm, statusFilter, createdByFilter, alteredByFilter, selectedTagsFilter, showDateFilter, dateFilter])
 
   // FUNÇÕES OTIMIZADAS COM useCallback
   const handleFormChange = useCallback((field, value) => {
@@ -296,10 +308,10 @@ export default function Leads() {
 
     try {
       const cleanPhone = telefone.replace(/\D/g, '')
-      const existingLead = leads.find(lead => 
+      const existingLead = leads.find(lead =>
         lead.telefone && lead.telefone.replace(/\D/g, '') === cleanPhone
       )
-      
+
       if (existingLead && (!editingItem || existingLead.id !== editingItem.id)) {
         setExistingPatient(existingLead)
         handleFormChange('tipo_visita', 'Recorrente')
@@ -336,7 +348,7 @@ export default function Leads() {
     }
 
     handleFormChange('telefone', formatted);
-    
+
     if (!editingItem && formatted.length >= 14) {
       debouncedCheckPatient(formatted);
     }
@@ -346,7 +358,7 @@ export default function Leads() {
     try {
       setLoading(true)
       setError(null)
-      
+
       const [leadsData, medicosData, especialidadesData, procedimentosData, tagsData] = await Promise.all([
         firebaseDataService.getAll('leads'),
         firebaseDataService.getAll('medicos'),
@@ -354,7 +366,7 @@ export default function Leads() {
         firebaseDataService.getAll('procedimentos'),
         firebaseDataService.getAll('tags')
       ])
-      
+
       setLeads(leadsData)
       setFilteredByDateLeads(leadsData)
       setMedicos(medicosData)
@@ -371,20 +383,21 @@ export default function Leads() {
 
   //FUNCAO TESTE - KANBAN.
   const handleUpdateLeadFromKanban = useCallback(async (leadId, updatedData) => {
-  try {
-    await firebaseDataService.update('leads', leadId, updatedData)
-    await loadData()
+    try {
+      const updated = await firebaseDataService.update('leads', leadId, updatedData)
+      // Optimistic: atualiza só o lead alterado
+      setLeads(prev => prev.map(l => l.id === leadId ? { ...l, ...updated } : l))
     } catch (err) {
       console.error('Erro ao atualizar lead do Kanban:', err)
       throw err
     }
-  }, [loadData])
+  }, [])
 
-  
+
 
   const handleSubmit = useCallback(async (e) => {
     e.preventDefault()
-    
+
     if (!editingItem) {
       const isDuplicate = await checkExistingPatient(formData.telefone)
       if (isDuplicate) {
@@ -396,12 +409,14 @@ export default function Leads() {
     try {
       setSaving(true)
       setError(null)
-      
+
       const dataToSave = {
         nome_paciente: formData.nome_paciente || '',
         telefone: formData.telefone || '',
         data_nascimento: formData.data_nascimento || '',
         email: formData.email || '',
+        nome_pai: formData.nome_pai || '',
+        nome_mae: formData.nome_mae || '',
         canal_contato: formData.canal_contato || '',
         solicitacao_paciente: formData.solicitacao_paciente || '',
         medico_agendado_id: formData.medico_agendado_id || '',
@@ -430,14 +445,17 @@ export default function Leads() {
         tags: formData.tags || [],
         data_registro_contato: editingItem ? editingItem.data_registro_contato : new Date().toISOString()
       }
-      
+
       if (editingItem) {
-        await firebaseDataService.update('leads', editingItem.id, dataToSave)
+        const updated = await firebaseDataService.update('leads', editingItem.id, dataToSave)
+        // Optimistic: atualiza só o lead alterado, sem refazer 5 getAll
+        setLeads(prev => prev.map(l => l.id === editingItem.id ? { ...l, ...updated } : l))
       } else {
-        await firebaseDataService.create('leads', dataToSave)
+        const created = await firebaseDataService.create('leads', dataToSave)
+        // Optimistic: prepend mantendo ordenação por dataRegistroContato desc
+        setLeads(prev => [created, ...prev])
       }
-      
-      await loadData()
+
       resetForm()
     } catch (err) {
       console.error('Erro ao salvar lead:', err)
@@ -453,6 +471,8 @@ export default function Leads() {
       telefone: '',
       data_nascimento: '',
       email: '',
+      nome_pai: '',
+      nome_mae: '',
       canal_contato: '',
       solicitacao_paciente: '',
       medico_agendado_id: '',
@@ -498,6 +518,8 @@ export default function Leads() {
       telefone: item.telefone || '',
       data_nascimento: item.data_nascimento || '',
       email: item.email || '',
+      nome_pai: item.nome_pai || '',
+      nome_mae: item.nome_mae || '',
       canal_contato: item.canal_contato || '',
       solicitacao_paciente: item.solicitacao_paciente || '',
       medico_agendado_id: item.medico_agendado_id || '',
@@ -540,22 +562,23 @@ export default function Leads() {
       try {
         setError(null)
         await firebaseDataService.delete('leads', id)
-        await loadData()
+        // Optimistic: remove sem refazer 5 getAll
+        setLeads(prev => prev.filter(l => l.id !== id))
       } catch (err) {
         console.error('Erro ao excluir lead:', err)
         setError('Erro ao excluir lead. Tente novamente.')
       }
     }
-  }, [loadData])
+  }, [])
 
   // FUNÇÕES DE MIGRAÇÃO
   const handleUserTrackingMigration = useCallback(async () => {
     try {
       setMigrating(true)
       setError(null)
-      
+
       const result = await firebaseDataService.migrateLeadsForUserTracking()
-      
+
       if (result.success) {
         await loadData()
         alert(`${result.message}\n\nEstatísticas:\n- Total: ${result.stats.total}\n- Migrados: ${result.stats.migrated}\n- Erros: ${result.stats.errors}`)
@@ -573,9 +596,9 @@ export default function Leads() {
     try {
       setMigrating(true)
       setError(null)
-      
+
       const result = await firebaseDataService.migrateLeadsFields()
-      
+
       if (result.success) {
         await loadData()
         alert(`${result.message}\n\nEstatísticas:\n- Total: ${result.stats.total}\n- Migrados: ${result.stats.migrated}\n- Erros: ${result.stats.errors}`)
@@ -593,9 +616,9 @@ export default function Leads() {
     try {
       setMigrating(true)
       setError(null)
-      
+
       const result = await firebaseDataService.migrateLeadsForTags()
-      
+
       if (result.success) {
         await loadData()
         alert(`${result.message}\n\nEstatísticas:\n- Total: ${result.stats.total}\n- Migrados: ${result.stats.migrated}\n- Erros: ${result.stats.errors}`)
@@ -613,9 +636,9 @@ export default function Leads() {
     try {
       setMigrating(true)
       setError(null)
-      
+
       const result = await firebaseDataService.createDefaultTags()
-      
+
       if (result.success) {
         await loadData()
         alert(result.message)
@@ -634,7 +657,7 @@ export default function Leads() {
     const today = new Date()
     let startDate = new Date()
     let endDate = new Date()
-    
+
     switch (filter) {
       case 'hoje':
         startDate = new Date(today.setHours(0, 0, 0, 0))
@@ -685,7 +708,7 @@ export default function Leads() {
       default:
         return
     }
-    
+
     setDateFilter({
       startDate: startDate.toISOString().split('T')[0],
       endDate: endDate.toISOString().split('T')[0],
@@ -707,16 +730,16 @@ export default function Leads() {
       setFilteredByDateLeads(leads)
       return
     }
-    
+
     const start = dateFilter.startDate ? new Date(dateFilter.startDate) : null
     const end = dateFilter.endDate ? new Date(dateFilter.endDate) : null
-    
+
     if (start) start.setHours(0, 0, 0, 0)
     if (end) end.setHours(23, 59, 59, 999)
-    
+
     const filtered = leads.filter(lead => {
       const leadDate = new Date(lead.data_registro_contato)
-      
+
       if (start && end) {
         return leadDate >= start && leadDate <= end
       } else if (start) {
@@ -724,16 +747,16 @@ export default function Leads() {
       } else if (end) {
         return leadDate <= end
       }
-      
+
       return true
     })
-    
+
     setFilteredByDateLeads(filtered)
   }, [leads, dateFilter.startDate, dateFilter.endDate])
 
   const exportToCSV = useCallback(() => {
     const leadsToExport = showDateFilter ? filteredByDateLeads : filteredLeads
-    
+
     const headers = [
       'Nome do Paciente',
       'Telefone',
@@ -750,7 +773,7 @@ export default function Leads() {
       'Criado por',
       'Última Alteração'
     ]
-    
+
     const csvContent = [
       headers.join(','),
       ...leadsToExport.map(lead => {
@@ -761,7 +784,7 @@ export default function Leads() {
           const data = prof.data_agendamento ? formatDate(prof.data_agendamento) : 'Sem data'
           return `${medico} (${especialidade}) - ${data}`
         }).join('; ') || 'Nenhum'
-        
+
         return [
           `"${lead.nome_paciente || ''}"`,
           `"${lead.telefone || ''}"`,
@@ -780,7 +803,7 @@ export default function Leads() {
         ].join(',')
       })
     ].join('\n')
-    
+
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
     const link = document.createElement('a')
     const url = URL.createObjectURL(blob)
@@ -799,7 +822,7 @@ export default function Leads() {
     try {
       setSaving(true)
       setError(null)
-      
+
       await firebaseDataService.createTag(tagForm)
       await loadData()
       resetTagForm()
@@ -817,7 +840,7 @@ export default function Leads() {
     try {
       setSaving(true)
       setError(null)
-      
+
       await firebaseDataService.updateTag(editingTag.id, tagForm)
       await loadData()
       resetTagForm()
@@ -832,16 +855,16 @@ export default function Leads() {
   const handleDeleteTag = useCallback(async (tagId) => {
     const tag = tags.find(t => t.id === tagId)
     const leadCount = leads.filter(lead => lead.tags?.includes(tagId)).length
-    
-    const confirmMessage = leadCount > 0 
+
+    const confirmMessage = leadCount > 0
       ? `Tem certeza que deseja excluir a tag "${tag.nome}"?\n\nEla será removida de ${leadCount} leads.`
       : `Tem certeza que deseja excluir a tag "${tag.nome}"?`
-    
+
     if (confirm(confirmMessage)) {
       try {
         setSaving(true)
         setError(null)
-        
+
         await firebaseDataService.deleteTag(tagId)
         await loadData()
         alert('✅ Tag excluída com sucesso!')
@@ -914,7 +937,7 @@ export default function Leads() {
       }
 
       await firebaseDataService.create('lembretes', novoLembrete)
-      
+
       setIsLembreteDialogOpen(false)
       setLembreteLeadId(null)
       setLembreteForm({
@@ -922,7 +945,7 @@ export default function Leads() {
         descricao: '',
         observacoes: ''
       })
-      
+
       alert('Lembrete criado com sucesso!')
     } catch (err) {
       console.error('Erro ao criar lembrete:', err)
@@ -940,27 +963,12 @@ export default function Leads() {
 
   // FUNÇÕES AUXILIARES OTIMIZADAS
   const getStatusColor = useCallback((status) => {
-    const colors = {
-      'Lead': 'bg-blue-100 text-blue-800',
-      'Convertido': 'bg-green-100 text-green-800',
-      'Perdido': 'bg-red-100 text-red-800',
-      'Agendado': 'bg-yellow-100 text-yellow-800',
-      'Não Agendou': 'bg-gray-100 text-gray-800',
-      'Confirmado': 'bg-purple-100 text-purple-800',
-      'Faltou': 'bg-orange-100 text-orange-800',
-      'Em Conversa': 'bg-amber-100 text-amber-800', 
-      'Sem Interação': 'bg-emerald-100 text-emerald-800',
-      'Follow 1': 'bg-slate-100 text-slate-800', 
-      'Follow 2': 'bg-slate-100 text-slate-800', 
-      'Follow 3': 'bg-slate-100 text-slate-800',
-      'Follow 7': 'bg-slate-100 text-slate-800' 
-    }
-    return colors[status] || 'bg-gray-100 text-gray-800'
+    return STATUS_COLORS[status] || 'bg-gray-100 text-gray-800'
   }, [])
 
   const formatDateTime = useCallback((dateString) => {
     if (!dateString) return 'Não informado'
-    
+
     try {
       const date = new Date(dateString)
       return date.toLocaleString('pt-BR', {
@@ -1000,6 +1008,12 @@ export default function Leads() {
   useEffect(() => {
     loadData()
   }, [loadData])
+
+  // Debounce do searchTerm — evita re-filtrar a base inteira a cada keystroke
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearchTerm(searchTerm), 250)
+    return () => clearTimeout(t)
+  }, [searchTerm])
 
   useEffect(() => {
     if (user) {
@@ -1042,8 +1056,8 @@ export default function Leads() {
             <p className="text-muted-foreground">Organize e gerencie as tags do sistema</p>
           </div>
           <div className="flex gap-2">
-            <Button 
-              onClick={handleTagMigration} 
+            <Button
+              onClick={handleTagMigration}
               disabled={migrating}
               variant="outline"
               className="bg-blue-50 border-blue-200 text-blue-800 hover:bg-blue-100"
@@ -1060,8 +1074,8 @@ export default function Leads() {
                 </>
               )}
             </Button>
-            <Button 
-              onClick={handleCreateDefaultTags} 
+            <Button
+              onClick={handleCreateDefaultTags}
               disabled={migrating}
               variant="outline"
               className="bg-green-50 border-green-200 text-green-800 hover:bg-green-100"
@@ -1121,7 +1135,7 @@ export default function Leads() {
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {tagsCategoria.map(tag => {
                     const leadCount = leads.filter(lead => lead.tags?.includes(tag.id)).length
-                    
+
                     return (
                       <div key={tag.id} className="bg-gray-50 rounded-lg border p-4">
                         <div className="flex items-center justify-between mb-3">
@@ -1132,7 +1146,7 @@ export default function Leads() {
                             <Tag className="h-4 w-4" />
                             {tag.nome}
                           </span>
-                          
+
                           <div className="flex gap-1">
                             <Button
                               variant="ghost"
@@ -1150,7 +1164,7 @@ export default function Leads() {
                             </Button>
                           </div>
                         </div>
-                        
+
                         <div className="text-sm text-gray-600">
                           <span className="font-medium">{leadCount}</span> leads usando esta tag
                         </div>
@@ -1196,8 +1210,8 @@ export default function Leads() {
             {activeTab === 'leads' ? 'Leads e Pacientes' : 'Gerenciamento de Tags'}
           </h1>
           <p className="text-muted-foreground">
-            {activeTab === 'leads' 
-              ? 'Gerencie leads e acompanhe conversões' 
+            {activeTab === 'leads'
+              ? 'Gerencie leads e acompanhe conversões'
               : 'Organize e gerencie as tags do sistema'
             }
           </p>
@@ -1230,7 +1244,7 @@ export default function Leads() {
               <h2 className="text-xl font-semibold">Lista de Leads</h2>
             </div>
             <div className="flex gap-2">
-              
+
               <Button
                 onClick={() => setShowKanban(true)}
                 className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white"
@@ -1239,9 +1253,9 @@ export default function Leads() {
                 Visualizar Funil Kanban
               </Button>
 
-              
-              <Button 
-                onClick={handleUserTrackingMigration} 
+
+              <Button
+                onClick={handleUserTrackingMigration}
                 disabled={migrating}
                 variant="outline"
                 className="bg-purple-50 border-purple-200 text-purple-800 hover:bg-purple-100"
@@ -1258,9 +1272,9 @@ export default function Leads() {
                   </>
                 )}
               </Button>
-              
-              <Button 
-                onClick={handleFieldMigration} 
+
+              <Button
+                onClick={handleFieldMigration}
                 disabled={migrating}
                 variant="outline"
                 className="bg-orange-50 border-orange-200 text-orange-800 hover:bg-orange-100"
@@ -1286,7 +1300,7 @@ export default function Leads() {
                 <Download className="mr-2 h-4 w-4" />
                 Exportar CSV
               </Button>
-              
+
               <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
                 <DialogTrigger asChild>
                   <Button onClick={() => resetForm()}>
@@ -1298,7 +1312,7 @@ export default function Leads() {
                   <DialogHeader>
                     <DialogTitle className="text-xl mb-4">{editingItem ? 'Editar Lead' : 'Novo Lead'}</DialogTitle>
                   </DialogHeader>
-                  
+
                   {existingPatient && !editingItem && (
                     <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
                       <div className="flex items-center">
@@ -1428,7 +1442,28 @@ export default function Leads() {
                             />
                           </div>
                         </div>
-                        
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="space-y-2">
+                            <label className="text-sm font-medium">Nome do Pai</label>
+                            <Input
+                              value={formData.nome_pai}
+                              onChange={(e) => handleFormChange('nome_pai', e.target.value)}
+                              placeholder="Nome do pai (opcional)"
+                              className="h-10"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-sm font-medium">Nome da Mãe</label>
+                            <Input
+                              value={formData.nome_mae}
+                              onChange={(e) => handleFormChange('nome_mae', e.target.value)}
+                              placeholder="Nome da mãe (opcional)"
+                              className="h-10"
+                            />
+                          </div>
+                        </div>
+
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                           <div className="space-y-2">
                             <label className="text-sm font-medium">Origem de Contato</label>
@@ -1437,16 +1472,9 @@ export default function Leads() {
                                 <SelectValue placeholder="Selecione a origem" />
                               </SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="Lead Interno">Lead Interno</SelectItem>
-                                <SelectItem value="Instagram">Instagram</SelectItem>
-                                <SelectItem value="Facebook">Facebook</SelectItem>
-                                <SelectItem value="WhatsApp">WhatsApp</SelectItem>
-                                <SelectItem value="Google">Google</SelectItem>
-                                <SelectItem value="Indicação">Indicação</SelectItem>
-                                <SelectItem value="Site">Site</SelectItem>
-                                <SelectItem value="Telefone">Telefone</SelectItem>
-                                <SelectItem value="Email">Email</SelectItem>
-                                <SelectItem value="Outros">Outros</SelectItem>
+                                {CANAIS_CONTATO.map(canal => (
+                                  <SelectItem key={canal} value={canal}>{canal}</SelectItem>
+                                ))}
                               </SelectContent>
                             </Select>
                           </div>
@@ -1463,28 +1491,24 @@ export default function Leads() {
                             </Select>
                           </div>
                           <div className="space-y-2">
+                            <label className="text-sm font-medium">Data da Consulta Efetiva</label>
+                            <Input
+                              type="date"
+                              value={formData.data_consulta_efetiva}
+                              onChange={(e) => handleFormChange('data_consulta_efetiva', e.target.value)}
+                              className="h-10"
+                            />
+                          </div>
+                          <div className="space-y-2">
                             <label className="text-sm font-medium">Status</label>
                             <Select value={formData.status} onValueChange={(value) => handleFormChange('status', value)}>
                               <SelectTrigger className="h-10">
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="Lead">Lead</SelectItem>
-                                <SelectItem value="Sem Interação">Sem Interação</SelectItem>
-                                <SelectItem value="Em Conversa">Em Conversa</SelectItem>
-                                <SelectItem value="Agendado">Agendado</SelectItem>
-                                <SelectItem value="Confirmado">Confirmado</SelectItem>
-                                <SelectItem value="Desmarcou">Desmarcou</SelectItem>
-                                <SelectItem value="Reagendado">Reagendado</SelectItem>
-                                <SelectItem value="Convertido">Convertido</SelectItem>
-                                <SelectItem value="Convertido Parcial">Convertido Parcial</SelectItem>
-                                <SelectItem value="Não Agendou">Não Agendou</SelectItem>
-                                <SelectItem value="Faltou">Faltou</SelectItem>
-                                <SelectItem value="Perdido">Perdido</SelectItem>
-                                <SelectItem value="Follow Up 1">Follow Up 1</SelectItem>
-                                <SelectItem value="Follow Up 2">Follow Up 2</SelectItem>
-                                <SelectItem value="Follow Up 3">Follow Up 3</SelectItem>
-                                <SelectItem value="Follow Up 7">Follow Up 7</SelectItem>
+                                {LEAD_STATUSES.map(s => (
+                                  <SelectItem key={s} value={s}>{s}</SelectItem>
+                                ))}
                               </SelectContent>
                             </Select>
                           </div>
@@ -1507,7 +1531,7 @@ export default function Leads() {
                             className="resize-none"
                           />
                         </div>
-                        
+
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                           <div className="space-y-2">
                             <label className="text-sm font-medium">Médico Principal</label>
@@ -1608,13 +1632,13 @@ export default function Leads() {
                                     <X className="h-4 w-4" />
                                   </Button>
                                 </div>
-                                
+
                                 {/* Primeira linha: Médico, Especialidade, Data */}
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                                   <div className="space-y-2">
                                     <label className="text-sm font-medium">Médico</label>
-                                    <Select 
-                                      value={profissional.medico_id} 
+                                    <Select
+                                      value={profissional.medico_id}
                                       onValueChange={(value) => handleOutrosProfissionaisChange(index, 'medico_id', value)}
                                     >
                                       <SelectTrigger className="h-10">
@@ -1629,11 +1653,11 @@ export default function Leads() {
                                       </SelectContent>
                                     </Select>
                                   </div>
-                                  
+
                                   <div className="space-y-2">
                                     <label className="text-sm font-medium">Especialidade</label>
-                                    <Select 
-                                      value={profissional.especialidade_id} 
+                                    <Select
+                                      value={profissional.especialidade_id}
                                       onValueChange={(value) => handleOutrosProfissionaisChange(index, 'especialidade_id', value)}
                                     >
                                       <SelectTrigger className="h-10">
@@ -1648,7 +1672,7 @@ export default function Leads() {
                                       </SelectContent>
                                     </Select>
                                   </div>
-                                  
+
                                   <div className="space-y-2">
                                     <label className="text-sm font-medium">Data Agendada</label>
                                     <Input
@@ -1664,8 +1688,8 @@ export default function Leads() {
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                   <div className="space-y-2">
                                     <label className="text-sm font-medium">Procedimento</label>
-                                    <Select 
-                                      value={profissional.procedimento_id} 
+                                    <Select
+                                      value={profissional.procedimento_id}
                                       onValueChange={(value) => handleOutrosProfissionaisChange(index, 'procedimento_id', value)}
                                     >
                                       <SelectTrigger className="h-10">
@@ -1680,7 +1704,7 @@ export default function Leads() {
                                       </SelectContent>
                                     </Select>
                                   </div>
-                                  
+
                                   <div className="space-y-2">
                                     <label className="text-sm font-medium">Valor (R$)</label>
                                     <Input
@@ -1692,7 +1716,7 @@ export default function Leads() {
                                       className="h-10"
                                     />
                                   </div>
-                                  
+
                                   <div className="space-y-2">
                                     <label className="text-sm font-medium">Local Agendado</label>
                                     <Input
@@ -1756,10 +1780,10 @@ export default function Leads() {
                               )}
                             </div>
                           </div>
-                          
+
                           <div>
                             <label className="text-sm font-medium mb-2 block">Tags Disponíveis</label>
-                            
+
                             {/* Campo de busca de tags */}
                             <div className="relative mb-3">
                               <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
@@ -1779,14 +1803,14 @@ export default function Leads() {
                                 </button>
                               )}
                             </div>
-                            
+
                             <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto p-2 border rounded-lg bg-gray-50">
                               {tags
                                 .filter(tag => !formData.tags.includes(tag.id))
                                 .filter(tag => {
                                   const searchLower = tagSearchTerm.toLowerCase()
-                                  return tag.nome.toLowerCase().includes(searchLower) || 
-                                         tag.categoria.toLowerCase().includes(searchLower)
+                                  return tag.nome.toLowerCase().includes(searchLower) ||
+                                    tag.categoria.toLowerCase().includes(searchLower)
                                 })
                                 .map(tag => (
                                   <button
@@ -1805,22 +1829,22 @@ export default function Leads() {
                                     <span className="text-xs text-gray-500">({tag.categoria})</span>
                                   </button>
                                 ))}
-                              
+
                               {/* Mensagem quando não há tags disponíveis após filtro */}
                               {tags.filter(tag => !formData.tags.includes(tag.id)).filter(tag => {
                                 const searchLower = tagSearchTerm.toLowerCase()
-                                return tag.nome.toLowerCase().includes(searchLower) || 
-                                       tag.categoria.toLowerCase().includes(searchLower)
+                                return tag.nome.toLowerCase().includes(searchLower) ||
+                                  tag.categoria.toLowerCase().includes(searchLower)
                               }).length === 0 && tags.length > 0 && (
-                                <div className="w-full text-center py-4 text-gray-500">
-                                  <Search className="h-6 w-6 mx-auto mb-2 text-gray-300" />
-                                  <p className="text-sm">
-                                    {tagSearchTerm ? 'Nenhuma tag encontrada para "' + tagSearchTerm + '"' : 'Todas as tags já foram selecionadas'}
-                                  </p>
-                                </div>
-                              )}
+                                  <div className="w-full text-center py-4 text-gray-500">
+                                    <Search className="h-6 w-6 mx-auto mb-2 text-gray-300" />
+                                    <p className="text-sm">
+                                      {tagSearchTerm ? 'Nenhuma tag encontrada para "' + tagSearchTerm + '"' : 'Todas as tags já foram selecionadas'}
+                                    </p>
+                                  </div>
+                                )}
                             </div>
-                            
+
                             {tags.length === 0 && (
                               <div className="text-center py-4 text-gray-500 mt-2">
                                 <Tag className="h-8 w-8 mx-auto mb-2 text-gray-300" />
@@ -1839,9 +1863,54 @@ export default function Leads() {
                         <CardTitle className="text-lg font-semibold">Orçamento</CardTitle>
                       </CardHeader>
                       <CardContent>
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                           <div className="space-y-2">
-                            <label className="text-sm font-medium">Valor Orçado (R$)</label>
+                            <label className="text-sm font-medium">Valor da Consulta (R$)</label>
+                            <Input
+                              type="number"
+                              step="0.01"
+                              value={formData.valor_consulta}
+                              onChange={(e) => handleFormChange('valor_consulta', e.target.value)}
+                              placeholder="0,00"
+                              className="h-10"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-sm font-medium">Taxa de Reserva (R$)</label>
+                            <Input
+                              type="number"
+                              step="0.01"
+                              value={formData.valor_taxa_reserva}
+                              onChange={(e) => handleFormChange('valor_taxa_reserva', e.target.value)}
+                              placeholder="0,00"
+                              className="h-10"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-sm font-medium">Valor do Procedimento (R$)</label>
+                            <Input
+                              type="number"
+                              step="0.01"
+                              value={formData.valor_procedimento}
+                              onChange={(e) => handleFormChange('valor_procedimento', e.target.value)}
+                              placeholder="0,00"
+                              className="h-10"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-sm font-medium">Identificação do Procedimento</label>
+                            <Input
+                              type="text"
+                              value={formData.identificacao_procedimento}
+                              onChange={(e) => handleFormChange('identificacao_procedimento', e.target.value)}
+                              placeholder="Ex: Cirurgia íntima, Botox..."
+                              className="h-10"
+                            />
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
+                          <div className="space-y-2">
+                            <label className="text-sm font-medium">Valor Total Orçado (R$)</label>
                             <Input
                               type="number"
                               step="0.01"
@@ -1894,7 +1963,7 @@ export default function Leads() {
                               <div className="flex items-center space-x-2">
                                 <Checkbox
                                   checked={formData[`followup${num}_realizado`]}
-                                  onCheckedChange={(checked) => 
+                                  onCheckedChange={(checked) =>
                                     handleFormChange(`followup${num}_realizado`, checked)
                                   }
                                 />
@@ -1920,6 +1989,25 @@ export default function Leads() {
                         <CardTitle className="text-lg font-semibold">Observações</CardTitle>
                       </CardHeader>
                       <CardContent>
+                        <div className="space-y-2 mb-4">
+                          <label className="text-sm font-medium flex items-center gap-2">
+                            <User className="h-4 w-4 text-purple-600" />
+                            Perfil Comportamental DISC
+                          </label>
+                          <Select
+                            value={formData.perfil_comportamental_disc}
+                            onValueChange={(value) => handleFormChange('perfil_comportamental_disc', value)}
+                          >
+                            <SelectTrigger className="h-10">
+                              <SelectValue placeholder="Selecione o perfil DISC" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {DISC_PROFILES.map(p => (
+                                <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
                         <div className="space-y-2">
                           <label className="text-sm font-medium">Observações Gerais</label>
                           <Textarea
@@ -1942,8 +2030,8 @@ export default function Leads() {
                       <Button type="button" variant="outline" onClick={resetForm}>
                         Cancelar
                       </Button>
-                      <Button 
-                        type="submit" 
+                      <Button
+                        type="submit"
                         disabled={saving || (existingPatient && !editingItem)}
                         className={existingPatient && !editingItem ? "opacity-50 cursor-not-allowed" : ""}
                       >
@@ -1973,7 +2061,7 @@ export default function Leads() {
                 </p>
               </CardContent>
             </Card>
-            
+
             <Card className="border-0 shadow-lg bg-gradient-to-br from-green-50 to-green-100 hover:shadow-xl transition-shadow">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium text-gray-700">Agendamentos</CardTitle>
@@ -1989,7 +2077,7 @@ export default function Leads() {
                 </p>
               </CardContent>
             </Card>
-            
+
             <Card className="border-0 shadow-lg bg-gradient-to-br from-purple-50 to-purple-100 hover:shadow-xl transition-shadow">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium text-gray-700">Convertidos</CardTitle>
@@ -2005,7 +2093,7 @@ export default function Leads() {
                 </p>
               </CardContent>
             </Card>
-            
+
             <Card className="border-0 shadow-lg bg-gradient-to-br from-orange-50 to-orange-100 hover:shadow-xl transition-shadow">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium text-gray-700">Valor Total</CardTitle>
@@ -2056,7 +2144,7 @@ export default function Leads() {
                 </div>
               </div>
             </CardHeader>
-            
+
             {showDateFilter && (
               <CardContent className="space-y-4">
                 {/* Filtros Rápidos */}
@@ -2137,10 +2225,10 @@ export default function Leads() {
                       id="startDate"
                       type="date"
                       value={dateFilter.startDate}
-                      onChange={(e) => setDateFilter(prev => ({ 
-                        ...prev, 
+                      onChange={(e) => setDateFilter(prev => ({
+                        ...prev,
                         startDate: e.target.value,
-                        quickFilter: '' 
+                        quickFilter: ''
                       }))}
                     />
                   </div>
@@ -2150,10 +2238,10 @@ export default function Leads() {
                       id="endDate"
                       type="date"
                       value={dateFilter.endDate}
-                      onChange={(e) => setDateFilter(prev => ({ 
-                        ...prev, 
+                      onChange={(e) => setDateFilter(prev => ({
+                        ...prev,
                         endDate: e.target.value,
-                        quickFilter: '' 
+                        quickFilter: ''
                       }))}
                     />
                   </div>
@@ -2199,66 +2287,66 @@ export default function Leads() {
                 className="pl-8"
               />
             </div>
-            
+
             <div className="flex flex-col gap-1">
               <label className="text-xs font-medium text-gray-600 px-1">Status</label>
               <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-[180px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="Todos">Todos os status</SelectItem>
-                <SelectItem value="Lead">Lead</SelectItem>
-                <SelectItem value="Sem Interação">Sem Interação</SelectItem>
-                <SelectItem value="Em Conversa">Em Conversa</SelectItem>
-                <SelectItem value="Agendado">Agendado</SelectItem>
-                <SelectItem value="Confirmado">Confirmado</SelectItem>
-                <SelectItem value="Desmarcou">Desmarcou</SelectItem>
-                <SelectItem value="Reagendado">Reagendado</SelectItem>
-                <SelectItem value="Convertido">Convertido</SelectItem>
-                <SelectItem value="Convertido Parcial">Convertido Parcial</SelectItem>
-                <SelectItem value="Não Agendou">Não Agendou</SelectItem>
-                <SelectItem value="Faltou">Faltou</SelectItem>
-                <SelectItem value="Perdido">Perdido</SelectItem>
-                <SelectItem value="Follow Up 1">Follow Up 1</SelectItem>
-                <SelectItem value="Follow Up 2">Follow Up 2</SelectItem>
-                <SelectItem value="Follow Up 3">Follow Up 3</SelectItem>
-                <SelectItem value="Follow Up 7">Follow Up 7</SelectItem>
-              </SelectContent>
+                <SelectTrigger className="w-[180px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Todos">Todos os status</SelectItem>
+                  <SelectItem value="Lead">Lead</SelectItem>
+                  <SelectItem value="Sem Interação">Sem Interação</SelectItem>
+                  <SelectItem value="Em Conversa">Em Conversa</SelectItem>
+                  <SelectItem value="Agendado">Agendado</SelectItem>
+                  <SelectItem value="Confirmado">Confirmado</SelectItem>
+                  <SelectItem value="Desmarcou">Desmarcou</SelectItem>
+                  <SelectItem value="Reagendado">Reagendado</SelectItem>
+                  <SelectItem value="Convertido">Convertido</SelectItem>
+                  <SelectItem value="Convertido Parcial">Convertido Parcial</SelectItem>
+                  <SelectItem value="Não Agendou">Não Agendou</SelectItem>
+                  <SelectItem value="Faltou">Faltou</SelectItem>
+                  <SelectItem value="Perdido">Perdido</SelectItem>
+                  <SelectItem value="Follow Up 1">Follow Up 1</SelectItem>
+                  <SelectItem value="Follow Up 2">Follow Up 2</SelectItem>
+                  <SelectItem value="Follow Up 3">Follow Up 3</SelectItem>
+                  <SelectItem value="Follow Up 7">Follow Up 7</SelectItem>
+                </SelectContent>
               </Select>
             </div>
-            
+
             <div className="flex flex-col gap-1">
               <label className="text-xs font-medium text-gray-600 px-1">Criado Por</label>
               <Select value={createdByFilter} onValueChange={setCreatedByFilter}>
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="Criado por..." />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="Todos">Todos os usuários</SelectItem>
-                {uniqueCreators.map((creator) => (
-                  <SelectItem key={creator} value={creator}>
-                    {creator}
-                  </SelectItem>
-                ))}
-              </SelectContent>
+                <SelectTrigger className="w-[180px]">
+                  <SelectValue placeholder="Criado por..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Todos">Todos os usuários</SelectItem>
+                  {uniqueCreators.map((creator) => (
+                    <SelectItem key={creator} value={creator}>
+                      {creator}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
               </Select>
             </div>
-            
+
             <div className="flex flex-col gap-1">
               <label className="text-xs font-medium text-gray-600 px-1">Alterado Por</label>
               <Select value={alteredByFilter} onValueChange={setAlteredByFilter}>
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="Alterado por..." />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="Todos">Todos os usuários</SelectItem>
-                {uniqueAltered.map((altered) => (
-                  <SelectItem key={altered} value={altered}>
-                    {altered}
-                  </SelectItem>
-                ))}
-              </SelectContent>
+                <SelectTrigger className="w-[180px]">
+                  <SelectValue placeholder="Alterado por..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Todos">Todos os usuários</SelectItem>
+                  {uniqueAltered.map((altered) => (
+                    <SelectItem key={altered} value={altered}>
+                      {altered}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
               </Select>
             </div>
 
@@ -2266,16 +2354,16 @@ export default function Leads() {
               <label className="text-xs font-medium text-gray-600 px-1">Itens/Página</label>
               {/* NOVO: Seletor de itens por página */}
               <Select value={itemsPerPage.toString()} onValueChange={(value) => changeItemsPerPage(parseInt(value))}>
-              <SelectTrigger className="w-[120px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="5">5 / página</SelectItem>
-                <SelectItem value="10">10 / página</SelectItem>
-                <SelectItem value="25">25 / página</SelectItem>
-                <SelectItem value="50">50 / página</SelectItem>
-                <SelectItem value="100">100 / página</SelectItem>
-              </SelectContent>
+                <SelectTrigger className="w-[120px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="5">5 / página</SelectItem>
+                  <SelectItem value="10">10 / página</SelectItem>
+                  <SelectItem value="25">25 / página</SelectItem>
+                  <SelectItem value="50">50 / página</SelectItem>
+                  <SelectItem value="100">100 / página</SelectItem>
+                </SelectContent>
               </Select>
             </div>
           </div>
@@ -2296,7 +2384,7 @@ export default function Leads() {
                 </Button>
               </div>
             )}
-            
+
             {alteredByFilter !== 'Todos' && (
               <div className="flex items-center gap-2 text-sm text-purple-600 bg-purple-50 px-3 py-1 rounded-lg border border-purple-200">
                 <Clock className="h-4 w-4" />
@@ -2311,7 +2399,7 @@ export default function Leads() {
                 </Button>
               </div>
             )}
-            
+
             {statusFilter !== 'Todos' && (
               <div className="flex items-center gap-2 text-sm text-green-600 bg-green-50 px-3 py-1 rounded-lg border border-green-200">
                 <Filter className="h-4 w-4" />
@@ -2326,7 +2414,7 @@ export default function Leads() {
                 </Button>
               </div>
             )}
-            
+
             {selectedTagsFilter.length > 0 && (
               <div className="flex items-center gap-2 text-sm text-purple-600 bg-purple-50 px-3 py-1 rounded-lg border border-purple-200">
                 <Tag className="h-4 w-4" />
@@ -2394,24 +2482,23 @@ export default function Leads() {
                     </button>
                   )}
                 </div>
-                
+
                 {/* Container de tags com altura limitada e scroll */}
                 <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto p-2 bg-white rounded-lg border border-blue-200">
                   {tags
                     .filter(tag => {
                       const searchLower = tagFilterSearchTerm.toLowerCase()
-                      return tag.nome.toLowerCase().includes(searchLower) || 
-                             tag.categoria.toLowerCase().includes(searchLower)
+                      return tag.nome.toLowerCase().includes(searchLower) ||
+                        tag.categoria.toLowerCase().includes(searchLower)
                     })
                     .map(tag => (
                       <button
                         key={tag.id}
                         onClick={() => toggleTagFilter(tag.id)}
-                        className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium border-2 transition-all ${
-                          selectedTagsFilter.includes(tag.id)
-                            ? 'text-white border-transparent'
-                            : 'text-gray-700 bg-white border-gray-300 hover:border-gray-400'
-                        }`}
+                        className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium border-2 transition-all ${selectedTagsFilter.includes(tag.id)
+                          ? 'text-white border-transparent'
+                          : 'text-gray-700 bg-white border-gray-300 hover:border-gray-400'
+                          }`}
                         style={{
                           backgroundColor: selectedTagsFilter.includes(tag.id) ? tag.cor : 'white',
                           borderColor: selectedTagsFilter.includes(tag.id) ? tag.cor : '#d1d5db'
@@ -2421,18 +2508,18 @@ export default function Leads() {
                         {tag.nome}
                       </button>
                     ))}
-                  
+
                   {/* Mensagem quando nenhuma tag é encontrada */}
                   {tags.filter(tag => {
                     const searchLower = tagFilterSearchTerm.toLowerCase()
-                    return tag.nome.toLowerCase().includes(searchLower) || 
-                           tag.categoria.toLowerCase().includes(searchLower)
+                    return tag.nome.toLowerCase().includes(searchLower) ||
+                      tag.categoria.toLowerCase().includes(searchLower)
                   }).length === 0 && (
-                    <div className="w-full text-center py-4 text-gray-500">
-                      <Search className="h-6 w-6 mx-auto mb-2 text-gray-300" />
-                      <p className="text-sm">Nenhuma tag encontrada para "{tagFilterSearchTerm}"</p>
-                    </div>
-                  )}
+                      <div className="w-full text-center py-4 text-gray-500">
+                        <Search className="h-6 w-6 mx-auto mb-2 text-gray-300" />
+                        <p className="text-sm">Nenhuma tag encontrada para "{tagFilterSearchTerm}"</p>
+                      </div>
+                    )}
                 </div>
               </CardContent>
             </Card>
@@ -2450,7 +2537,7 @@ export default function Leads() {
                       <span> (filtrados de {leads.length} total)</span>
                     )}
                   </span>
-                  
+
                   {/* Navegação de páginas no header */}
                   {totalPages > 1 && (
                     <div className="flex items-center gap-2">
@@ -2493,7 +2580,8 @@ export default function Leads() {
                       <th className="text-left p-4">Status</th>
                       <th className="text-left p-4">Criado por</th>
                       <th className="text-left p-4">Lembretes</th>
-                      <th className="text-left p-4">Histórico</th>
+                      <th className="text-left p-4">Passagens</th>
+                      <th className="text-left p-4">Consumo</th>
                       <th className="text-left p-4">Ações</th>
                     </tr>
                   </thead>
@@ -2502,7 +2590,7 @@ export default function Leads() {
                       const medico = medicos.find(m => m.id === lead.medico_agendado_id)
                       const especialidade = especialidades.find(e => e.id === lead.especialidade_id)
                       const outrosProfissionaisAtivos = lead.outros_profissionais?.filter(prof => prof.ativo) || []
-                      
+
                       return (
                         <tr key={lead.id} className="border-b hover:bg-gray-50">
                           <td className="p-4">
@@ -2560,7 +2648,7 @@ export default function Leads() {
                               R$ {(lead.valor_orcado || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                             </span>
                           </td>
-                          
+
                           <td className="p-4">
                             <div className="flex flex-wrap gap-1 max-w-[150px]">
                               {lead.tags?.map(tagId => {
@@ -2582,7 +2670,7 @@ export default function Leads() {
                               )}
                             </div>
                           </td>
-                          
+
                           <td className="p-4">
                             <Badge className={getStatusColor(lead.status)}>
                               {lead.status}
@@ -2608,7 +2696,7 @@ export default function Leads() {
                               )}
                             </div>
                           </td>
-                          
+
                           <td className="p-4">
                             <Button
                               variant="outline"
@@ -2620,25 +2708,48 @@ export default function Leads() {
                             </Button>
                           </td>
 
-                          
+                          {/* Célula de Passagens/Visitas do Paciente */}
                           <td className="p-4">
-                              <HistoricoConsumoPaciente 
-                                pacienteId={lead.id}
-                                trigger={
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    title="Ver Histórico de Consumo"
-                                    className="bg-green-50 border-green-200 text-green-700 hover:bg-green-100"
-                                  >
-                                    <ShoppingBag className="h-4 w-4" />
-                                  </Button>
-                                }
-                              />
-                            </td>
+                            <HistoricoVisitas
+                              pacienteId={lead.id}
+                              paciente={lead}
+                              onUpdate={loadData}
+                              trigger={
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  title="Ver Histórico de Visitas"
+                                  className="bg-purple-50 border-purple-200 text-purple-700 hover:bg-purple-100 relative"
+                                >
+                                  <History className="h-4 w-4" />
+                                  {lead.total_visitas && lead.total_visitas > 1 && (
+                                    <Badge className="absolute -top-2 -right-2 bg-purple-600 text-white text-xs px-1.5 py-0.5 rounded-full min-w-[18px] h-[18px] flex items-center justify-center">
+                                      {lead.total_visitas}
+                                    </Badge>
+                                  )}
+                                </Button>
+                              }
+                            />
+                          </td>
+
+                          <td className="p-4">
+                            <HistoricoConsumoPaciente
+                              pacienteId={lead.id}
+                              trigger={
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  title="Ver Histórico de Consumo"
+                                  className="bg-green-50 border-green-200 text-green-700 hover:bg-green-100"
+                                >
+                                  <ShoppingBag className="h-4 w-4" />
+                                </Button>
+                              }
+                            />
+                          </td>
 
 
-                          
+
                           <td className="p-4">
                             <div className="flex space-x-2">
                               <Button
@@ -2682,7 +2793,7 @@ export default function Leads() {
                   <div className="text-sm text-gray-600">
                     Mostrando {((currentPage - 1) * itemsPerPage) + 1} até {Math.min(currentPage * itemsPerPage, filteredLeads.length)} de {filteredLeads.length} leads
                   </div>
-                  
+
                   <div className="flex items-center gap-2">
                     <Button
                       variant="outline"
@@ -2765,13 +2876,13 @@ export default function Leads() {
           <DialogHeader>
             <DialogTitle>{editingTag ? 'Editar Tag' : 'Nova Tag'}</DialogTitle>
           </DialogHeader>
-          
+
           <div className="space-y-4">
             <div className="space-y-2">
               <label className="text-sm font-medium">Nome da Tag *</label>
               <Input
                 value={tagForm.nome}
-                onChange={(e) => setTagForm({...tagForm, nome: e.target.value})}
+                onChange={(e) => setTagForm({ ...tagForm, nome: e.target.value })}
                 placeholder="Ex: Flacidez, Botox, Urgente..."
                 maxLength={20}
               />
@@ -2779,9 +2890,9 @@ export default function Leads() {
 
             <div className="space-y-2">
               <label className="text-sm font-medium">Categoria</label>
-              <Select 
-                value={tagForm.categoria} 
-                onValueChange={(value) => setTagForm({...tagForm, categoria: value})}
+              <Select
+                value={tagForm.categoria}
+                onValueChange={(value) => setTagForm({ ...tagForm, categoria: value })}
               >
                 <SelectTrigger>
                   <SelectValue />
@@ -2805,10 +2916,9 @@ export default function Leads() {
                   <button
                     key={cor}
                     type="button"
-                    onClick={() => setTagForm({...tagForm, cor})}
-                    className={`w-8 h-8 rounded-full border-2 transition-all ${
-                      tagForm.cor === cor ? 'border-gray-800 scale-110' : 'border-gray-300 hover:border-gray-400'
-                    }`}
+                    onClick={() => setTagForm({ ...tagForm, cor })}
+                    className={`w-8 h-8 rounded-full border-2 transition-all ${tagForm.cor === cor ? 'border-gray-800 scale-110' : 'border-gray-300 hover:border-gray-400'
+                      }`}
                     style={{ backgroundColor: cor }}
                   />
                 ))}
@@ -2816,14 +2926,14 @@ export default function Leads() {
               <Input
                 type="color"
                 value={tagForm.cor}
-                onChange={(e) => setTagForm({...tagForm, cor: e.target.value})}
+                onChange={(e) => setTagForm({ ...tagForm, cor: e.target.value })}
                 className="h-10"
               />
             </div>
 
             <div className="space-y-2">
               <label className="text-sm font-medium">Preview</label>
-              <div 
+              <div
                 className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-white text-sm font-medium"
                 style={{ backgroundColor: tagForm.cor }}
               >
