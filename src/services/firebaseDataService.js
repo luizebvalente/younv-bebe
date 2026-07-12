@@ -43,6 +43,33 @@ class FirebaseDataService {
     return mapping[entity] || entity
   }
 
+  // Converte uma chave snake_case para o camelCase usado nos documentos do Firestore
+  snakeToCamelKey(key) {
+    return key.replace(/_([a-z0-9])/g, (_, c) => c.toUpperCase())
+  }
+
+  // Transforma APENAS os campos presentes em `data` para o formato Firebase.
+  // Essencial em updates parciais: transformToFirebase monta o documento completo
+  // preenchendo campos ausentes com defaults ('' / 0 / [] / false), o que fazia um
+  // update parcial (ex: registrar passagem, atualizar performance de carteira)
+  // apagar nome, telefone, histórico e demais dados do documento no Firestore.
+  transformPartialToFirebase(entity, data) {
+    const full = this.transformToFirebase(entity, data)
+    // Entidade sem transform específico: transformToFirebase retorna o próprio objeto
+    if (full === data) return data
+
+    const partial = {}
+    Object.keys(data).forEach(key => {
+      let camelKey = this.snakeToCamelKey(key)
+      // Exceção histórica: o campo no Firestore chama-se "nomePackiente" (typo antigo)
+      if (entity === 'leads' && key === 'nome_paciente') camelKey = 'nomePackiente'
+      if (Object.prototype.hasOwnProperty.call(full, camelKey)) {
+        partial[camelKey] = full[camelKey]
+      }
+    })
+    return partial
+  }
+
   // Transformar dados para formato Firebase (camelCase)
   transformToFirebase(entity, data) {
     if (entity === 'leads') {
@@ -1140,7 +1167,10 @@ class FirebaseDataService {
         log(`🔄 update ${entity} ${id}`)
 
         const currentUser = this.getCurrentUserInfo()
-        const updatedFirebaseData = this.transformToFirebase(entity, updatedItem)
+        // IMPORTANTE: transformação PARCIAL — envia só os campos presentes em updatedItem.
+        // Usar transformToFirebase aqui gerava o documento inteiro com defaults e
+        // sobrescrevia (apagava) os demais campos do doc a cada update parcial.
+        const updatedFirebaseData = this.transformPartialToFirebase(entity, updatedItem)
 
         // updateDoc do Firestore só substitui os campos enviados — não precisamos baixar
         // o doc atual antes (eliminado 1 round-trip). Apenas garantimos que campos de
