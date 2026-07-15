@@ -5,10 +5,29 @@ import firestoreService from './firebase/firestore'
 const DEV = typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV
 const log = (...args) => { if (DEV) console.log(...args) }
 
+// Cache simples de leituras por entidade: evita que Header, Sidebar e a página
+// baixem a MESMA coleção inteira em paralelo no boot, e que cada ação recarregue
+// coleções que não mudaram. Escritas invalidam a entidade correspondente.
+const CACHE_TTL_MS = 60 * 1000
+
 class FirebaseDataService {
   constructor() {
     this.useFirebase = true // Ativar Firebase
-    this.initializeData()
+    this._cache = new Map()    // entity -> { data, ts }
+    this._inflight = new Map() // entity -> Promise
+    // NOTA: initializeData() não roda mais no boot — fazia um getAll('especialidades')
+    // (e possíveis escritas) a cada carregamento da página, antes mesmo do login.
+    // A base de produção já está inicializada; para seed manual use initializeData().
+  }
+
+  invalidateCache(entity) {
+    if (entity) {
+      this._cache.delete(entity)
+      this._inflight.delete(entity)
+    } else {
+      this._cache.clear()
+      this._inflight.clear()
+    }
   }
 
   // Função para obter dados do usuário atual
@@ -660,8 +679,9 @@ class FirebaseDataService {
     try {
       const firebaseData = this.transformToFirebase('tags', tagData)
       const result = await firestoreService.create('tags', firebaseData)
+      this.invalidateCache('tags')
 
-      console.log('✅ Tag criada:', result.id)
+      log('✅ Tag criada:', result.id)
       return { success: true, id: result.id }
     } catch (error) {
       console.error('❌ Erro ao criar tag:', error)
@@ -676,10 +696,13 @@ class FirebaseDataService {
     }
 
     try {
-      const firebaseData = this.transformToFirebase('tags', tagData)
+      // Parcial: enviar só o que o form edita — o transform completo reescrevia
+      // dataCriacao para "agora" e reativava tag inativa a cada edição
+      const firebaseData = this.transformPartialToFirebase('tags', tagData)
       await firestoreService.update('tags', id, firebaseData)
+      this.invalidateCache('tags')
 
-      console.log('✅ Tag atualizada:', id)
+      log('✅ Tag atualizada:', id)
       return { success: true }
     } catch (error) {
       console.error('❌ Erro ao atualizar tag:', error)
@@ -694,7 +717,7 @@ class FirebaseDataService {
     }
 
     try {
-      console.log('🗑️ Excluindo tag:', id)
+      log('🗑️ Excluindo tag:', id)
 
       const rawLeads = await firestoreService.getAll('leads')
       let leadsUpdated = 0
@@ -702,17 +725,18 @@ class FirebaseDataService {
       for (const lead of rawLeads) {
         if (lead.tags && lead.tags.includes(id)) {
           const updatedTags = lead.tags.filter(tagId => tagId !== id)
-          await firestoreService.update('leads', lead.id, {
-            ...lead,
-            tags: updatedTags
-          })
+          // Payload mínimo: só o campo tags (antes regravava o doc inteiro,
+          // incluindo o campo espúrio 'id')
+          await firestoreService.update('leads', lead.id, { tags: updatedTags })
           leadsUpdated++
         }
       }
 
       await firestoreService.delete('tags', id)
+      this.invalidateCache('tags')
+      this.invalidateCache('leads')
 
-      console.log(`✅ Tag excluída. ${leadsUpdated} leads atualizados.`)
+      log(`✅ Tag excluída. ${leadsUpdated} leads atualizados.`)
       return { success: true, leadsUpdated }
     } catch (error) {
       console.error('❌ Erro ao excluir tag:', error)
@@ -727,19 +751,12 @@ class FirebaseDataService {
     }
 
     try {
-      const currentLead = await firestoreService.getById('leads', leadId)
-      if (!currentLead) {
-        throw new Error('Lead não encontrado')
-      }
+      // Payload mínimo: só tags. Não precisa baixar o doc nem regravar tudo —
+      // updateDoc mescla e o resto do documento permanece intacto.
+      await firestoreService.update('leads', leadId, { tags: tags || [] })
+      this.invalidateCache('leads')
 
-      const updatedLead = {
-        ...currentLead,
-        tags: tags || []
-      }
-
-      await firestoreService.update('leads', leadId, updatedLead)
-
-      console.log('✅ Tags do lead atualizadas:', leadId)
+      log('✅ Tags do lead atualizadas:', leadId)
       return { success: true }
     } catch (error) {
       console.error('❌ Erro ao atualizar tags do lead:', error)
@@ -1099,7 +1116,18 @@ class FirebaseDataService {
 
   async getAll(entity) {
     if (this.useFirebase) {
-      try {
+      // Cache: devolve resultado recente sem novo round-trip
+      const cached = this._cache.get(entity)
+      if (cached && Date.now() - cached.ts < CACHE_TTL_MS) {
+        return [...cached.data]
+      }
+      // Dedupe: se já existe uma busca em andamento para a mesma entidade
+      // (ex.: Header + Sidebar + página pedindo 'leads' ao mesmo tempo), compartilha a Promise
+      if (this._inflight.has(entity)) {
+        const data = await this._inflight.get(entity)
+        return [...data]
+      }
+      const fetchPromise = (async () => {
         let orderField = 'createdAt'
         if (entity === 'leads') {
           orderField = 'dataRegistroContato'
@@ -1108,9 +1136,19 @@ class FirebaseDataService {
         }
         const data = await firestoreService.getAll(this.getCollectionName(entity), orderField, 'desc')
         return data.map(item => this.transformFromFirebase(entity, item))
+      })()
+      this._inflight.set(entity, fetchPromise)
+      try {
+        const data = await fetchPromise
+        this._cache.set(entity, { data, ts: Date.now() })
+        return [...data]
       } catch (error) {
-        console.error('Erro ao buscar dados do Firebase, usando localStorage como fallback')
-        return this.getFromLocalStorage(entity)
+        // Não mascarar erro de leitura com localStorage vazio — a tela deve mostrar o erro,
+        // não uma lista vazia fingindo sucesso.
+        console.error(`❌ Erro ao buscar ${entity} do Firebase:`, error)
+        throw error
+      } finally {
+        this._inflight.delete(entity)
       }
     } else {
       return this.getFromLocalStorage(entity)
@@ -1151,10 +1189,13 @@ class FirebaseDataService {
 
         const firebaseData = this.transformToFirebase(entity, itemWithUserInfo)
         const result = await firestoreService.create(this.getCollectionName(entity), firebaseData)
+        this.invalidateCache(entity)
         return this.transformFromFirebase(entity, result)
       } catch (error) {
-        console.error('Erro ao criar no Firebase, usando localStorage como fallback')
-        return this.createInLocalStorage(entity, item)
+        // NUNCA cair para localStorage em produção: o usuário veria "salvo" mas o dado
+        // não existiria no Firestore (perda silenciosa). Propaga para a UI tratar.
+        console.error(`❌ Erro ao criar ${entity} no Firebase:`, error)
+        throw error
       }
     } else {
       return this.createInLocalStorage(entity, item)
@@ -1193,12 +1234,34 @@ class FirebaseDataService {
           delete finalUpdateData.dataRegistroContato
         }
 
-        const result = await firestoreService.update(this.getCollectionName(entity), id, finalUpdateData)
-        return this.transformFromFirebase(entity, { ...result, id })
+        await firestoreService.update(this.getCollectionName(entity), id, finalUpdateData)
+        this.invalidateCache(entity)
+
+        // IMPORTANTE: retornar APENAS o que foi enviado (eco do payload parcial, em snake_case).
+        // Antes retornava transformFromFirebase(payloadParcial), que re-hidratava o objeto
+        // INTEIRO com defaults ('' / 0 / []) — o merge otimista das telas ({...lead, ...retorno})
+        // então zerava historico_visitas/total_visitas/criado_por em memória, e um drag no
+        // Kanban gravava esse objeto corrompido de volta no Firestore (perda permanente).
+        const echo = { id, ...updatedItem }
+        if (entity === 'leads') {
+          const cu = this.getCurrentUserInfo()
+          echo.alterado_por_id = cu.id
+          echo.alterado_por_nome = cu.nome
+          echo.alterado_por_email = cu.email
+          echo.data_ultima_alteracao = new Date().toISOString()
+          // Campos imutáveis nunca entram no eco (não foram gravados)
+          delete echo.criado_por_id
+          delete echo.criado_por_nome
+          delete echo.criado_por_email
+          delete echo.data_registro_contato
+        }
+        delete echo.createdAt
+        return echo
       } catch (error) {
+        // Propaga o erro — cair para localStorage fazia a UI mostrar sucesso
+        // sem nada ter sido gravado no Firestore (perda silenciosa de dados).
         console.error(`❌ Erro ao atualizar ${entity} no Firebase:`, error.message)
-        log('🔄 Fallback para localStorage...')
-        return this.updateInLocalStorage(entity, id, updatedItem)
+        throw error
       }
     } else {
       return this.updateInLocalStorage(entity, id, updatedItem)
@@ -1208,10 +1271,14 @@ class FirebaseDataService {
   async delete(entity, id) {
     if (this.useFirebase) {
       try {
-        return await firestoreService.delete(this.getCollectionName(entity), id)
+        const result = await firestoreService.delete(this.getCollectionName(entity), id)
+        this.invalidateCache(entity)
+        return result
       } catch (error) {
-        console.error('Erro ao deletar no Firebase, usando localStorage como fallback')
-        return this.deleteFromLocalStorage(entity, id)
+        // Propagar: deletar "só no localStorage" fazia a UI sumir com o item
+        // enquanto ele continuava existindo no Firestore.
+        console.error(`❌ Erro ao deletar ${entity} no Firebase:`, error)
+        throw error
       }
     } else {
       return this.deleteFromLocalStorage(entity, id)

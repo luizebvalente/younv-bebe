@@ -274,14 +274,14 @@ class FirestoreService {
   // Calcular taxa de conversão
   async getConversionRate() {
     try {
-      console.log('📊 Calculando taxa de conversão')
+      log('📊 Calculando taxa de conversão')
       
       const leads = await this.getAll('leads')
       const total = leads.length
       const converted = leads.filter(lead => lead.status === 'Convertido').length
       const rate = total > 0 ? (converted / total * 100).toFixed(1) : 0
       
-      console.log(`✅ Taxa de conversão: ${rate}% (${converted}/${total})`)
+      log(`✅ Taxa de conversão: ${rate}% (${converted}/${total})`)
       return rate
     } catch (error) {
       console.error('❌ Erro ao calcular taxa de conversão:', error)
@@ -292,7 +292,7 @@ class FirestoreService {
   // Obter leads por canal
   async getLeadsByChannel() {
     try {
-      console.log('📊 Analisando leads por canal')
+      log('📊 Analisando leads por canal')
       
       const leads = await this.getAll('leads')
       const channels = {}
@@ -301,7 +301,7 @@ class FirestoreService {
         channels[canal] = (channels[canal] || 0) + 1
       })
       
-      console.log('✅ Análise por canal concluída:', channels)
+      log('✅ Análise por canal concluída:', channels)
       return channels
     } catch (error) {
       console.error('❌ Erro ao buscar leads por canal:', error)
@@ -312,7 +312,7 @@ class FirestoreService {
   // Obter estatísticas por médico
   async getMedicoStats() {
     try {
-      console.log('📊 Calculando estatísticas por médico')
+      log('📊 Calculando estatísticas por médico')
       
       const [leads, medicos] = await Promise.all([
         this.getAll('leads'),
@@ -329,7 +329,7 @@ class FirestoreService {
         }
       })
       
-      console.log('✅ Estatísticas por médico calculadas')
+      log('✅ Estatísticas por médico calculadas')
       return stats
     } catch (error) {
       console.error('❌ Erro ao buscar estatísticas por médico:', error)
@@ -362,13 +362,13 @@ class FirestoreService {
   // Inicializar dados padrão (para primeira execução)
   async initializeDefaultData() {
     try {
-      console.log('🚀 Verificando se dados padrão precisam ser inicializados')
+      log('🚀 Verificando se dados padrão precisam ser inicializados')
       
       // Verificar se já existem dados
       const especialidades = await this.getAll('especialidades')
       
       if (especialidades.length === 0) {
-        console.log('📦 Criando dados padrão...')
+        log('📦 Criando dados padrão...')
         
         // Criar especialidades padrão
         const defaultEspecialidades = [
@@ -383,9 +383,9 @@ class FirestoreService {
           await this.create('especialidades', esp)
         }
         
-        console.log('✅ Dados padrão inicializados com sucesso')
+        log('✅ Dados padrão inicializados com sucesso')
       } else {
-        console.log('ℹ️ Dados padrão já existem, não é necessário inicializar')
+        log('ℹ️ Dados padrão já existem, não é necessário inicializar')
       }
     } catch (error) {
       console.error('❌ Erro ao inicializar dados padrão:', error)

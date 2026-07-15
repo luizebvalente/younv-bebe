@@ -42,9 +42,19 @@ export const STATUS_COLORS = {
   'Follow Up 7': 'bg-violet-100 text-violet-800',
 }
 
-// --- Colunas do Kanban (13 colunas do funil) ---
-// Exclui: Lead, Convertido Parcial, Perdido (estados terminais/iniciais)
+// --- Colunas do Kanban (14 colunas do funil) ---
+// Exclui: Convertido Parcial, Perdido (estados terminais)
+// 'Lead' incluído: é o status default dos leads criados pelo webhook Digisac —
+// sem essa coluna eles ficavam invisíveis no funil.
 export const FUNIL_COLUMNS = [
+  {
+    id: 'lead',
+    title: 'Lead',
+    status: 'Lead',
+    color: 'bg-blue-50 border-blue-300',
+    textColor: 'text-blue-800',
+    iconName: 'UserPlus',
+  },
   {
     id: 'sem_interacao',
     title: 'Sem Interação',
@@ -212,6 +222,43 @@ export const TAG_CATEGORIES = [
   'Condição',
   'Outros',
 ]
+
+// --- Helper: definição ÚNICA de "lead convertido" ---
+// Antes cada tela usava um critério (Dashboard/Recorrentes: amplo; Relatórios: só status),
+// gerando números divergentes para o mesmo dataset. Critério unificado:
+// status Convertido/Convertido Parcial OU orçamento fechado (Total/Parcial).
+export function isLeadConvertido(lead) {
+  return (
+    lead.status === 'Convertido' ||
+    lead.status === 'Convertido Parcial' ||
+    lead.orcamento_fechado === 'Total' ||
+    lead.orcamento_fechado === 'Parcial'
+  )
+}
+
+// --- Helper: parse de data "YYYY-MM-DD" como data LOCAL ---
+// new Date('2026-07-14') interpreta como UTC → em UTC-3 vira 13/07 21:00 e
+// filtros/exibições deslizam 1 dia. Use SEMPRE este helper para date-only.
+export function parseLocalDate(dateStr) {
+  if (!dateStr) return null
+  if (dateStr instanceof Date) return dateStr
+  const m = String(dateStr).match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (m) {
+    // Se vier com hora (ISO completo), o parse nativo já é correto
+    if (String(dateStr).length > 10) return new Date(dateStr)
+    return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+  }
+  return new Date(dateStr)
+}
+
+// --- Helper: intervalo [início, fim] local de um par de dates YYYY-MM-DD ---
+export function localDayRange(startStr, endStr) {
+  const start = parseLocalDate(startStr)
+  if (start) start.setHours(0, 0, 0, 0)
+  const end = parseLocalDate(endStr)
+  if (end) end.setHours(23, 59, 59, 999)
+  return [start, end]
+}
 
 // --- Helper: obter cor de status de lead ---
 export function getStatusColor(status) {
