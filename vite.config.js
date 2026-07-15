@@ -13,5 +13,18 @@ export default defineConfig({
   css: {
     postcss: './postcss.config.js',
   },
+  build: {
+    rollupOptions: {
+      output: {
+        // Vendors estáveis em chunks próprios: melhor cache entre deploys
+        // (o hash do chunk só muda quando a lib muda) e paraleliza o download.
+        manualChunks: {
+          'react-vendor': ['react', 'react-dom', 'react-router-dom'],
+          'firebase': ['firebase/app', 'firebase/auth', 'firebase/firestore'],
+          'recharts': ['recharts'],
+        },
+      },
+    },
+  },
 })
 
