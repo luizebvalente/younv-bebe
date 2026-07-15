@@ -10,13 +10,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
-import { useFirestore } from '@/hooks/useFirestore'
 import { useAuth } from '@/contexts/AuthContext'
 import firebaseDataService from '@/services/firebaseDataService'
 import FunilKanban from '@/components/pages/FunilKanban'
 import HistoricoConsumoPaciente from '@/components/pages/HistoricoConsumoPaciente'
 import HistoricoVisitas from '@/components/pages/HistoricoVisitas'
-import { LEAD_STATUSES, CANAIS_CONTATO, DISC_PROFILES, STATUS_COLORS, TAG_CATEGORIES } from '@/constants/crm'
+import { LEAD_STATUSES, CANAIS_CONTATO, DISC_PROFILES, STATUS_COLORS, TAG_CATEGORIES, isLeadConvertido, parseLocalDate } from '@/constants/crm'
 
 
 // FUNÇÃO UTILITÁRIA PARA DEBOUNCE
@@ -43,7 +42,6 @@ export default function Leads() {
   // ESTADOS DE UI
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [migrating, setMigrating] = useState(false)
   const [error, setError] = useState(null)
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [editingItem, setEditingItem] = useState(null)
@@ -188,10 +186,14 @@ export default function Leads() {
   const removerOutroProfissional = useCallback((index) => {
     setFormData(prev => {
       const newOutrosProfissionais = [...prev.outros_profissionais]
+      // Slot completo (7 chaves) — recriar com menos chaves deixava inputs uncontrolled
       newOutrosProfissionais[index] = {
         medico_id: '',
         especialidade_id: '',
         data_agendamento: '',
+        procedimento_id: '',
+        valor_agendamento: '',
+        local_agendado: '',
         ativo: false
       }
 
@@ -215,13 +217,19 @@ export default function Leads() {
       if (statusFilter !== 'Todos' && lead.status !== statusFilter) return false
       if (createdByFilter !== 'Todos' && lead.criado_por_nome !== createdByFilter) return false
       if (alteredByFilter !== 'Todos' && lead.alterado_por_nome !== alteredByFilter) return false
-      if (selectedTagsFilter.length > 0 && !selectedTagsFilter.every(tagId => lead.tags?.includes(tagId))) return false
+      // OR entre tags: lead com QUALQUER uma das tags selecionadas passa
+      // (antes exigia TODAS — na prática o filtro "nunca batia" com 2+ tags)
+      if (selectedTagsFilter.length > 0 && !selectedTagsFilter.some(tagId => lead.tags?.includes(tagId))) return false
 
       if (hasSearch) {
         const nome = lead.nome_paciente ? lead.nome_paciente.toLowerCase() : ''
         const email = lead.email ? lead.email.toLowerCase() : ''
         const tel = lead.telefone || ''
-        if (!nome.includes(term) && !email.includes(term) && !tel.includes(term)) return false
+        // Busca por telefone ignora máscara: "11987" acha "(11) 98765-4321"
+        const termDigits = term.replace(/\D/g, '')
+        const telDigits = tel.replace(/\D/g, '')
+        const phoneMatch = termDigits.length >= 4 && telDigits.includes(termDigits)
+        if (!nome.includes(term) && !email.includes(term) && !tel.includes(term) && !phoneMatch) return false
       }
       return true
     })
@@ -244,9 +252,9 @@ export default function Leads() {
   const stats = useMemo(() => ({
     total: filteredLeads.length,
     agendados: filteredLeads.filter(lead => lead.status === 'Agendado').length,
-    convertidos: filteredLeads.filter(lead => lead.status === 'Convertido').length,
-    valorTotal: filteredLeads.filter(lead => lead.status === 'Convertido')
-      .reduce((sum, lead) => sum + (lead.valor_orcado || 0), 0)
+    convertidos: filteredLeads.filter(isLeadConvertido).length,
+    valorTotal: filteredLeads.filter(isLeadConvertido)
+      .reduce((sum, lead) => sum + (Number(lead.valor_orcado) || 0), 0)
   }), [filteredLeads])
 
   const uniqueCreators = useMemo(() => {
@@ -399,9 +407,14 @@ export default function Leads() {
     e.preventDefault()
 
     if (!editingItem) {
-      const isDuplicate = await checkExistingPatient(formData.telefone)
-      if (isDuplicate) {
-        setError(`Telefone já registrado! Este número pertence ao paciente: ${existingPatient.nome_paciente}. Não é possível cadastrar o mesmo telefone novamente.`)
+      // Verificação direta na lista (não usa o state existingPatient, que pode estar
+      // desatualizado se o usuário colar o telefone e submeter antes do debounce)
+      const cleanPhone = (formData.telefone || '').replace(/\D/g, '')
+      const dup = cleanPhone.length >= 10
+        ? leads.find(l => l.telefone && l.telefone.replace(/\D/g, '') === cleanPhone)
+        : null
+      if (dup) {
+        setError(`Telefone já registrado! Este número pertence ao paciente: ${dup.nome_paciente || '(sem nome)'}. Não é possível cadastrar o mesmo telefone novamente.`)
         return
       }
     }
@@ -442,6 +455,13 @@ export default function Leads() {
         followup2_data: formData.followup2_data || '',
         followup3_realizado: Boolean(formData.followup3_realizado),
         followup3_data: formData.followup3_data || '',
+        // Campos financeiros/clínicos que existiam no formulário mas NÃO eram salvos
+        // (digitava-se e o valor evaporava — perda silenciosa de dados)
+        data_consulta_efetiva: formData.data_consulta_efetiva || '',
+        valor_consulta: formData.valor_consulta !== '' ? parseFloat(formData.valor_consulta) || 0 : '',
+        valor_taxa_reserva: formData.valor_taxa_reserva !== '' ? parseFloat(formData.valor_taxa_reserva) || 0 : '',
+        valor_procedimento: formData.valor_procedimento !== '' ? parseFloat(formData.valor_procedimento) || 0 : '',
+        identificacao_procedimento: formData.identificacao_procedimento || '',
         tags: formData.tags || [],
         data_registro_contato: editingItem ? editingItem.data_registro_contato : new Date().toISOString()
       }
@@ -463,7 +483,7 @@ export default function Leads() {
     } finally {
       setSaving(false)
     }
-  }, [formData, editingItem, existingPatient, checkExistingPatient, loadData])
+  }, [formData, editingItem, leads])
 
   const resetForm = useCallback(() => {
     setFormData({
@@ -503,6 +523,11 @@ export default function Leads() {
       followup2_data: '',
       followup3_realizado: false,
       followup3_data: '',
+      data_consulta_efetiva: '',
+      valor_consulta: '',
+      valor_taxa_reserva: '',
+      valor_procedimento: '',
+      identificacao_procedimento: '',
       tags: []
     })
     setEditingItem(null)
@@ -529,13 +554,13 @@ export default function Leads() {
       motivo_nao_agendamento: item.motivo_nao_agendamento || '',
       outros_profissionais_agendados: item.outros_profissionais_agendados || false,
       quais_profissionais: item.quais_profissionais || '',
-      // CARREGAR OUTROS PROFISSIONAIS OU USAR ESTRUTURA PADRÃO
+      // CARREGAR OUTROS PROFISSIONAIS OU USAR ESTRUTURA PADRÃO (7 chaves por slot)
       outros_profissionais: item.outros_profissionais || [
-        { medico_id: '', especialidade_id: '', data_agendamento: '', ativo: false },
-        { medico_id: '', especialidade_id: '', data_agendamento: '', ativo: false },
-        { medico_id: '', especialidade_id: '', data_agendamento: '', ativo: false },
-        { medico_id: '', especialidade_id: '', data_agendamento: '', ativo: false },
-        { medico_id: '', especialidade_id: '', data_agendamento: '', ativo: false }
+        { medico_id: '', especialidade_id: '', data_agendamento: '', procedimento_id: '', valor_agendamento: '', local_agendado: '', ativo: false },
+        { medico_id: '', especialidade_id: '', data_agendamento: '', procedimento_id: '', valor_agendamento: '', local_agendado: '', ativo: false },
+        { medico_id: '', especialidade_id: '', data_agendamento: '', procedimento_id: '', valor_agendamento: '', local_agendado: '', ativo: false },
+        { medico_id: '', especialidade_id: '', data_agendamento: '', procedimento_id: '', valor_agendamento: '', local_agendado: '', ativo: false },
+        { medico_id: '', especialidade_id: '', data_agendamento: '', procedimento_id: '', valor_agendamento: '', local_agendado: '', ativo: false }
       ],
       pagou_reserva: item.pagou_reserva || false,
       tipo_visita: item.tipo_visita || '',
@@ -544,13 +569,19 @@ export default function Leads() {
       valor_fechado_parcial: item.valor_fechado_parcial ? item.valor_fechado_parcial.toString() : '',
       observacao_geral: item.observacao_geral || '',
       perfil_comportamental_disc: item.perfil_comportamental_disc || '',
-      status: item.status || 'Lead',
+      status: item.status || 'Sem Interação',
       followup1_realizado: Boolean(item.followup1_realizado),
       followup1_data: item.followup1_data || '',
       followup2_realizado: Boolean(item.followup2_realizado),
       followup2_data: item.followup2_data || '',
       followup3_realizado: Boolean(item.followup3_realizado),
       followup3_data: item.followup3_data || '',
+      // Re-hidratar campos financeiros/clínicos (antes ficavam vazios ao editar)
+      data_consulta_efetiva: item.data_consulta_efetiva || '',
+      valor_consulta: item.valor_consulta !== '' && item.valor_consulta !== undefined && item.valor_consulta !== null ? String(item.valor_consulta) : '',
+      valor_taxa_reserva: item.valor_taxa_reserva !== '' && item.valor_taxa_reserva !== undefined && item.valor_taxa_reserva !== null ? String(item.valor_taxa_reserva) : '',
+      valor_procedimento: item.valor_procedimento !== '' && item.valor_procedimento !== undefined && item.valor_procedimento !== null ? String(item.valor_procedimento) : '',
+      identificacao_procedimento: item.identificacao_procedimento || '',
       tags: item.tags || []
     })
     setTagSearchTerm('')
@@ -571,84 +602,8 @@ export default function Leads() {
     }
   }, [])
 
-  // FUNÇÕES DE MIGRAÇÃO
-  const handleUserTrackingMigration = useCallback(async () => {
-    try {
-      setMigrating(true)
-      setError(null)
-
-      const result = await firebaseDataService.migrateLeadsForUserTracking()
-
-      if (result.success) {
-        await loadData()
-        alert(`${result.message}\n\nEstatísticas:\n- Total: ${result.stats.total}\n- Migrados: ${result.stats.migrated}\n- Erros: ${result.stats.errors}`)
-      } else {
-        setError(result.message)
-      }
-    } catch (err) {
-      setError(`Erro durante a migração de rastreamento: ${err.message}`)
-    } finally {
-      setMigrating(false)
-    }
-  }, [loadData])
-
-  const handleFieldMigration = useCallback(async () => {
-    try {
-      setMigrating(true)
-      setError(null)
-
-      const result = await firebaseDataService.migrateLeadsFields()
-
-      if (result.success) {
-        await loadData()
-        alert(`${result.message}\n\nEstatísticas:\n- Total: ${result.stats.total}\n- Migrados: ${result.stats.migrated}\n- Erros: ${result.stats.errors}`)
-      } else {
-        setError(result.message)
-      }
-    } catch (err) {
-      setError(`Erro durante a migração: ${err.message}`)
-    } finally {
-      setMigrating(false)
-    }
-  }, [loadData])
-
-  const handleTagMigration = useCallback(async () => {
-    try {
-      setMigrating(true)
-      setError(null)
-
-      const result = await firebaseDataService.migrateLeadsForTags()
-
-      if (result.success) {
-        await loadData()
-        alert(`${result.message}\n\nEstatísticas:\n- Total: ${result.stats.total}\n- Migrados: ${result.stats.migrated}\n- Erros: ${result.stats.errors}`)
-      } else {
-        setError(result.message)
-      }
-    } catch (err) {
-      setError(`Erro durante a migração de tags: ${err.message}`)
-    } finally {
-      setMigrating(false)
-    }
-  }, [loadData])
-
-  const handleCreateDefaultTags = useCallback(async () => {
-    try {
-      setMigrating(true)
-      setError(null)
-
-      const result = await firebaseDataService.createDefaultTags()
-
-      if (result.success) {
-        await loadData()
-        alert(result.message)
-      }
-    } catch (err) {
-      setError(`Erro ao criar tags padrão: ${err.message}`)
-    } finally {
-      setMigrating(false)
-    }
-  }, [loadData])
+  // Migrações em massa removidas da UI (rodavam update sequencial em todos os leads
+  // de produção sem confirmação). Disponíveis via firebaseDataService.migrate* no console.
 
 
 
@@ -709,9 +664,11 @@ export default function Leads() {
         return
     }
 
+    // Formatar como data LOCAL — toISOString() usa UTC e à noite (UTC-3) pulava para o dia seguinte
+    const toLocalYMD = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
     setDateFilter({
-      startDate: startDate.toISOString().split('T')[0],
-      endDate: endDate.toISOString().split('T')[0],
+      startDate: toLocalYMD(startDate),
+      endDate: toLocalYMD(endDate),
       quickFilter: filter
     })
   }, [])
@@ -731,8 +688,10 @@ export default function Leads() {
       return
     }
 
-    const start = dateFilter.startDate ? new Date(dateFilter.startDate) : null
-    const end = dateFilter.endDate ? new Date(dateFilter.endDate) : null
+    // parseLocalDate: 'YYYY-MM-DD' como data LOCAL (new Date('YYYY-MM-DD') é UTC
+    // e deslocava o filtro 1 dia para trás no fuso do Brasil)
+    const start = dateFilter.startDate ? parseLocalDate(dateFilter.startDate) : null
+    const end = dateFilter.endDate ? parseLocalDate(dateFilter.endDate) : null
 
     if (start) start.setHours(0, 0, 0, 0)
     if (end) end.setHours(23, 59, 59, 999)
@@ -785,26 +744,29 @@ export default function Leads() {
           return `${medico} (${especialidade}) - ${data}`
         }).join('; ') || 'Nenhum'
 
+        // Escapar aspas internas (nome com " quebrava a linha inteira do CSV)
+        const cell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`
         return [
-          `"${lead.nome_paciente || ''}"`,
-          `"${lead.telefone || ''}"`,
-          `"${lead.email || ''}"`,
-          `"${lead.data_nascimento || ''}"`,
-          `"${lead.canal_contato || ''}"`,
-          `"${getMedicoNome(lead.medico_agendado_id)}"`,
-          `"${getEspecialidadeNome(lead.especialidade_id)}"`,
-          `"${outrosProfissionais}"`,
-          `"${lead.valor_orcado || 0}"`,
-          `"${lead.status || ''}"`,
-          `"${lead.tipo_visita || ''}"`,
-          `"${formatDate(lead.data_registro_contato)}"`,
-          `"${lead.criado_por_nome || ''}"`,
-          `"${formatDate(lead.data_ultima_alteracao)}"`
+          cell(lead.nome_paciente),
+          cell(lead.telefone),
+          cell(lead.email),
+          cell(lead.data_nascimento),
+          cell(lead.canal_contato),
+          cell(getMedicoNome(lead.medico_agendado_id)),
+          cell(getEspecialidadeNome(lead.especialidade_id)),
+          cell(outrosProfissionais),
+          cell(lead.valor_orcado || 0),
+          cell(lead.status),
+          cell(lead.tipo_visita),
+          cell(formatDate(lead.data_registro_contato)),
+          cell(lead.criado_por_nome),
+          cell(formatDate(lead.data_ultima_alteracao))
         ].join(',')
       })
     ].join('\n')
 
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+    // BOM para o Excel reconhecer UTF-8 (acentos)
+    const blob = new Blob(['﻿' + csvContent], { type: 'text/csv;charset=utf-8;' })
     const link = document.createElement('a')
     const url = URL.createObjectURL(blob)
     link.setAttribute('href', url)
@@ -1056,33 +1018,9 @@ export default function Leads() {
             <p className="text-muted-foreground">Organize e gerencie as tags do sistema</p>
           </div>
           <div className="flex gap-2">
-            <Button
-              onClick={handleTagMigration}
-              disabled={migrating}
-              variant="outline"
-              className="bg-blue-50 border-blue-200 text-blue-800 hover:bg-blue-100"
-            >
-              {migrating ? (
-                <>
-                  <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                  Migrando...
-                </>
-              ) : (
-                <>
-                  <Tag className="mr-2 h-4 w-4" />
-                  Migrar Tags
-                </>
-              )}
-            </Button>
-            <Button
-              onClick={handleCreateDefaultTags}
-              disabled={migrating}
-              variant="outline"
-              className="bg-green-50 border-green-200 text-green-800 hover:bg-green-100"
-            >
-              <Tag className="mr-2 h-4 w-4" />
-              Tags Padrão
-            </Button>
+            {/* Botões de migração em massa removidos da UI de produção:
+                rodavam getAll + update sequencial em TODOS os leads sem confirmação.
+                As funções continuam disponíveis em firebaseDataService para uso pontual via console. */}
             <Button onClick={() => setIsTagDialogOpen(true)}>
               <Plus className="mr-2 h-4 w-4" />
               Nova Tag
@@ -1191,7 +1129,7 @@ export default function Leads() {
         )}
       </div>
     )
-  }, [tags, leads, migrating, handleTagMigration, handleCreateDefaultTags, openEditTagDialog, handleDeleteTag])
+  }, [tags, leads, openEditTagDialog, handleDeleteTag])
 
   if (loading) {
     return (
@@ -1254,44 +1192,8 @@ export default function Leads() {
               </Button>
 
 
-              <Button
-                onClick={handleUserTrackingMigration}
-                disabled={migrating}
-                variant="outline"
-                className="bg-purple-50 border-purple-200 text-purple-800 hover:bg-purple-100"
-              >
-                {migrating ? (
-                  <>
-                    <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                    Migrando...
-                  </>
-                ) : (
-                  <>
-                    <User className="mr-2 h-4 w-4" />
-                    Migrar Usuários
-                  </>
-                )}
-              </Button>
-
-              <Button
-                onClick={handleFieldMigration}
-                disabled={migrating}
-                variant="outline"
-                className="bg-orange-50 border-orange-200 text-orange-800 hover:bg-orange-100"
-              >
-                {migrating ? (
-                  <>
-                    <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                    Migrando...
-                  </>
-                ) : (
-                  <>
-                    <RefreshCw className="mr-2 h-4 w-4" />
-                    Migrar Campos
-                  </>
-                )}
-              </Button>
-
+              {/* Botões "Migrar Usuários"/"Migrar Campos" removidos: disparavam update
+                  sequencial em TODOS os leads de produção sem confirmação. */}
               <Button
                 onClick={exportToCSV}
                 variant="outline"
@@ -1570,11 +1472,14 @@ export default function Leads() {
                                 <SelectValue placeholder="Selecione o procedimento" />
                               </SelectTrigger>
                               <SelectContent className="max-h-[200px] overflow-y-auto">
-                                {procedimentos.map((procedimento) => (
-                                  <SelectItem key={procedimento.id} value={procedimento.id}>
-                                    {procedimento.nome}
-                                  </SelectItem>
-                                ))}
+                                {/* Filtra pela especialidade selecionada (antes listava todos) */}
+                                {procedimentos
+                                  .filter(p => !formData.especialidade_id || !p.especialidade_id || p.especialidade_id === formData.especialidade_id)
+                                  .map((procedimento) => (
+                                    <SelectItem key={procedimento.id} value={procedimento.id}>
+                                      {procedimento.nome}
+                                    </SelectItem>
+                                  ))}
                               </SelectContent>
                             </Select>
                           </div>
@@ -1696,11 +1601,14 @@ export default function Leads() {
                                         <SelectValue placeholder="Selecione o procedimento" />
                                       </SelectTrigger>
                                       <SelectContent className="max-h-[200px] overflow-y-auto">
-                                        {procedimentos.map((procedimento) => (
-                                          <SelectItem key={procedimento.id} value={procedimento.id}>
-                                            {procedimento.nome}
-                                          </SelectItem>
-                                        ))}
+                                        {/* Filtra pela especialidade do slot (antes listava todos) */}
+                                        {procedimentos
+                                          .filter(p => !profissional.especialidade_id || !p.especialidade_id || p.especialidade_id === profissional.especialidade_id)
+                                          .map((procedimento) => (
+                                            <SelectItem key={procedimento.id} value={procedimento.id}>
+                                              {procedimento.nome}
+                                            </SelectItem>
+                                          ))}
                                       </SelectContent>
                                     </Select>
                                   </div>

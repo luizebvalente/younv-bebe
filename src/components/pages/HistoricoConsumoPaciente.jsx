@@ -342,7 +342,7 @@ export default function HistoricoConsumoPaciente({ pacienteId, trigger }) {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {historico
+                        {[...historico]
                           .sort((a, b) => new Date(b.data) - new Date(a.data))
                           .map((item, index) => (
                             <TableRow key={index}>

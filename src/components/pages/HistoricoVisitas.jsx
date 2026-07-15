@@ -39,7 +39,7 @@ import {
 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import firebaseDataService from '@/services/firebaseDataService'
-import { TIPOS_VISITA, STATUS_VISITA } from '@/constants/crm'
+import { TIPOS_VISITA, STATUS_VISITA, parseLocalDate } from '@/constants/crm'
 
 /**
  * 📋 COMPONENTE DE HISTÓRICO DE VISITAS/PASSAGENS DO PACIENTE
@@ -114,7 +114,6 @@ export default function HistoricoVisitas({ pacienteId, paciente, onUpdate, trigg
       // Sempre buscar dados frescos do Firebase para garantir que temos a versão mais atual
       if (pacienteId) {
         const pacienteData = await firebaseDataService.getById('leads', pacienteId)
-        console.log('📋 Dados do paciente carregados:', pacienteData)
         if (pacienteData?.historico_visitas && Array.isArray(pacienteData.historico_visitas)) {
           setHistorico(pacienteData.historico_visitas)
         } else {
@@ -131,7 +130,9 @@ export default function HistoricoVisitas({ pacienteId, paciente, onUpdate, trigg
   const formatDate = (dateString) => {
     if (!dateString) return '-'
     try {
-      const date = new Date(dateString)
+      // parseLocalDate: 'YYYY-MM-DD' interpretado como data LOCAL
+      // (new Date('YYYY-MM-DD') é UTC e exibia a visita 1 dia antes no Brasil)
+      const date = parseLocalDate(dateString)
       return date.toLocaleDateString('pt-BR', {
         day: '2-digit',
         month: '2-digit',
@@ -213,7 +214,8 @@ export default function HistoricoVisitas({ pacienteId, paciente, onUpdate, trigg
       }
 
       const novaVisita = {
-        id: editingVisita?.id || `visita_${Date.now()}`,
+        // Sufixo aleatório evita colisão de id (dois saves no mesmo milissegundo)
+        id: editingVisita?.id || `visita_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
         data_visita: visitaForm.data_visita,
         medico_id: visitaForm.medico_id,
         medico_nome: getMedicoNome(visitaForm.medico_id),
@@ -249,7 +251,7 @@ export default function HistoricoVisitas({ pacienteId, paciente, onUpdate, trigg
       const primeiraVisita = novoHistorico[novoHistorico.length - 1]?.data_visita
       const ultimaVisita = novoHistorico[0]?.data_visita
       const totalVisitas = novoHistorico.length
-      const valorTotalVisitas = novoHistorico.reduce((sum, v) => sum + (v.valor || 0), 0)
+      const valorTotalVisitas = novoHistorico.reduce((sum, v) => sum + (parseFloat(v.valor) || 0), 0)
 
       // Calcular média de dias entre visitas
       let mediaDiasEntreVisitas = 0
@@ -338,7 +340,7 @@ export default function HistoricoVisitas({ pacienteId, paciente, onUpdate, trigg
       const primeiraVisita = novoHistorico[novoHistorico.length - 1]?.data_visita || null
       const ultimaVisita = novoHistorico[0]?.data_visita || null
       const totalVisitas = novoHistorico.length
-      const valorTotalVisitas = novoHistorico.reduce((sum, v) => sum + (v.valor || 0), 0)
+      const valorTotalVisitas = novoHistorico.reduce((sum, v) => sum + (parseFloat(v.valor) || 0), 0)
 
       let mediaDiasEntreVisitas = 0
       if (novoHistorico.length > 1) {
@@ -350,6 +352,14 @@ export default function HistoricoVisitas({ pacienteId, paciente, onUpdate, trigg
         }
         mediaDiasEntreVisitas = Math.round(totalDias / (novoHistorico.length - 1))
       }
+
+      // Recalcular recorrência por especialidade (antes só o save recalculava —
+      // excluir a única visita de uma especialidade deixava a contagem antiga para sempre)
+      const visitasPorEspecialidadeDel = {}
+      novoHistorico.forEach(v => {
+        const espId = v.especialidade_id || 'sem_especialidade'
+        visitasPorEspecialidadeDel[espId] = (visitasPorEspecialidadeDel[espId] || 0) + 1
+      })
 
       // Buscar dados atuais do paciente para somar consumo de produtos
       const pacienteAtualDel = await firebaseDataService.getById('leads', pacienteId)
@@ -364,7 +374,8 @@ export default function HistoricoVisitas({ pacienteId, paciente, onUpdate, trigg
         valor_total_visitas: valorTotalVisitas,
         media_dias_entre_visitas: mediaDiasEntreVisitas,
         valor_total_gasto: valorTotalGastoDel,
-        tipo_visita: totalVisitas > 1 ? 'Recorrente' : totalVisitas === 1 ? 'Primeira Visita' : ''
+        tipo_visita: totalVisitas > 1 ? 'Recorrente' : totalVisitas === 1 ? 'Primeira Visita' : '',
+        visitas_por_especialidade: visitasPorEspecialidadeDel
       })
 
       setHistorico(novoHistorico)
@@ -462,7 +473,7 @@ export default function HistoricoVisitas({ pacienteId, paciente, onUpdate, trigg
     const sortedHistorico = [...historico].sort((a, b) => new Date(a.data_visita) - new Date(b.data_visita))
     const primeiraVisita = sortedHistorico[0]?.data_visita
     const ultimaVisita = sortedHistorico[sortedHistorico.length - 1]?.data_visita
-    const valorTotal = historico.reduce((sum, v) => sum + (v.valor || 0), 0)
+    const valorTotal = historico.reduce((sum, v) => sum + (parseFloat(v.valor) || 0), 0)
 
     const hoje = new Date()
     const diasDesdeUltimaVisita = ultimaVisita
@@ -952,7 +963,9 @@ export default function HistoricoVisitas({ pacienteId, paciente, onUpdate, trigg
                             <SelectValue placeholder="Selecione" />
                           </SelectTrigger>
                           <SelectContent>
-                            {procedimentos.map((procedimento) => (
+                            {procedimentos
+                              .filter(p => !visitaForm.especialidade_id || !p.especialidade_id || p.especialidade_id === visitaForm.especialidade_id)
+                              .map((procedimento) => (
                               <SelectItem key={procedimento.id} value={procedimento.id}>
                                 {procedimento.nome}
                               </SelectItem>

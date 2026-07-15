@@ -115,13 +115,11 @@ export default function FunilKanban({ leads, medicos, especialidades, tags, onUp
       setUpdating(true)
       setError(null)
 
-      // Atualizar o status do lead
-      const updatedLead = {
-        ...draggedLead,
-        status: columnStatus
-      }
-
-      await onUpdateLead(draggedLead.id, updatedLead)
+      // Payload MÍNIMO: só o status. Enviar o lead inteiro ({...draggedLead})
+      // gravava de volta qualquer campo desatualizado do objeto em memória —
+      // se ele tivesse sido corrompido por um merge otimista anterior, o drag
+      // apagava historico_visitas/total_visitas do Firestore permanentemente.
+      await onUpdateLead(draggedLead.id, { status: columnStatus })
       setDraggedLead(null)
     } catch (err) {
       console.error('Erro ao atualizar lead:', err)
@@ -246,7 +244,7 @@ export default function FunilKanban({ leads, medicos, especialidades, tags, onUp
           <div className="flex gap-4 p-4 h-full overflow-x-auto">
             {KANBAN_COLUMNS.map(column => {
               const columnLeads = getLeadsByColumn(column.status)
-              const columnValue = columnLeads.reduce((sum, lead) => sum + (lead.valor_orcado || 0), 0)
+              const columnValue = columnLeads.reduce((sum, lead) => sum + (parseFloat(lead.valor_orcado) || 0), 0)
               const Icon = column.icon
 
               return (
