@@ -102,6 +102,22 @@ const Medicos = () => {
   }
 
   const handleDelete = async (id) => {
+    // Bloquear deleção se houver leads vinculados (deletar deixava referências órfãs:
+    // leads exibindo "N/A" e rankings/relatórios por médico quebrados)
+    try {
+      const leads = await firebaseDataService.getAll('leads')
+      const emUso = leads.filter(l =>
+        l.medico_agendado_id === id ||
+        (l.outros_profissionais || []).some(p => p.medico_id === id && p.ativo)
+      ).length
+      if (emUso > 0) {
+        alert(`Este médico está vinculado a ${emUso} lead(s) e não pode ser excluído.\nTransfira os leads para outro médico antes, ou mantenha o cadastro.`)
+        return
+      }
+    } catch (error) {
+      console.error('Erro ao verificar uso do médico:', error)
+    }
+
     if (confirm('Tem certeza que deseja excluir este médico?')) {
       try {
         setLoading(true)

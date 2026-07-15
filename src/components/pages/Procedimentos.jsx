@@ -124,16 +124,33 @@ const Procedimentos = () => {
   const handleEdit = (item) => {
     setEditingItem(item)
     setFormData({
-      nome: item.nome,
-      valor: item.valor.toString(),
-      duracao: item.duracao.toString(),
-      categoria: item.categoria,
-      especialidade_id: item.especialidade_id
+      nome: item.nome || '',
+      // ?? '' — registro legado sem valor/duracao lançava TypeError e travava o diálogo
+      valor: (item.valor ?? '').toString(),
+      duracao: (item.duracao ?? '').toString(),
+      categoria: item.categoria || '',
+      especialidade_id: item.especialidade_id || ''
     })
     setIsDialogOpen(true)
   }
 
   const handleDelete = async (id) => {
+    // Bloquear deleção se houver leads referenciando o procedimento (evita órfãos
+    // em relatórios e na tela de leads)
+    try {
+      const leads = await firebaseDataService.getAll('leads')
+      const emUso = leads.filter(l =>
+        l.procedimento_agendado_id === id ||
+        (l.outros_profissionais || []).some(p => p.procedimento_id === id && p.ativo)
+      ).length
+      if (emUso > 0) {
+        alert(`Este procedimento está vinculado a ${emUso} lead(s) e não pode ser excluído.\nRemova o vínculo nos leads ou mantenha o procedimento.`)
+        return
+      }
+    } catch (err) {
+      console.error('Erro ao verificar uso do procedimento:', err)
+    }
+
     if (confirm('Tem certeza que deseja excluir este procedimento?')) {
       try {
         setError(null)
@@ -159,7 +176,7 @@ const Procedimentos = () => {
     setError(null)
   }
 
-  const totalValue = procedimentos.reduce((sum, proc) => sum + proc.valor, 0)
+  const totalValue = procedimentos.reduce((sum, proc) => sum + (Number(proc.valor) || 0), 0)
 
   if (loading) {
     return (

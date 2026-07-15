@@ -88,6 +88,30 @@ const Especialidades = () => {
   }
 
   const handleDelete = async (id) => {
+    // Bloquear deleção se houver médicos, procedimentos ou leads vinculados
+    // (deletar deixava referências órfãs em todo o sistema)
+    try {
+      const [medicos, procedimentos, leads] = await Promise.all([
+        firebaseDataService.getAll('medicos'),
+        firebaseDataService.getAll('procedimentos'),
+        firebaseDataService.getAll('leads')
+      ])
+      const medicosVinculados = medicos.filter(m => (m.especialidade_id || m.especialidadeId) === id).length
+      const procedimentosVinculados = procedimentos.filter(p => p.especialidade_id === id).length
+      const leadsVinculados = leads.filter(l =>
+        l.especialidade_id === id ||
+        (l.outros_profissionais || []).some(p => p.especialidade_id === id && p.ativo)
+      ).length
+      if (medicosVinculados + procedimentosVinculados + leadsVinculados > 0) {
+        alert(`Esta especialidade está em uso e não pode ser excluída:\n` +
+          `- ${medicosVinculados} médico(s)\n- ${procedimentosVinculados} procedimento(s)\n- ${leadsVinculados} lead(s)\n\n` +
+          `Remova os vínculos antes de excluir.`)
+        return
+      }
+    } catch (err) {
+      console.error('Erro ao verificar uso da especialidade:', err)
+    }
+
     if (confirm('Tem certeza que deseja excluir esta especialidade?')) {
       try {
         setError(null)
