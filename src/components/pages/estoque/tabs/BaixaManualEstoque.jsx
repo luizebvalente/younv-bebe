@@ -105,20 +105,15 @@ export default function BaixaManualEstoqueV2({ produto, estoques: estoquesProp, 
       console.log('🔍 Buscando pacientes:', termo)
       
       const leadsData = await firebaseDataService.getAll('leads')
-      
-      // Filtrar apenas leads ativos E que correspondam à busca
+
+      // Busca em TODOS os leads (o filtro anterior por status Convertido/Agendado/Confirmado
+      // escondia a maioria dos pacientes — ex.: leads do WhatsApp com status 'Lead')
       const termoLower = termo.toLowerCase()
       const resultados = leadsData.filter(lead => {
-        const isAtivo = lead.status === 'Convertido' || 
-                       lead.status === 'Agendado' ||
-                       lead.status === 'Confirmado'
-        
-        if (!isAtivo) return false
-        
         const matchNome = lead.nome_paciente?.toLowerCase().includes(termoLower)
         const matchTelefone = lead.telefone?.includes(termo)
         const matchEmail = lead.email?.toLowerCase().includes(termoLower)
-        
+
         return matchNome || matchTelefone || matchEmail
       })
       

@@ -299,30 +299,66 @@ class EstoqueDataService {
   }
 
   /**
-   * Baixa um kit do estoque
+   * Baixa um kit do estoque.
+   * CORRIGIDO: além de registrar a movimentação, agora DÁ BAIXA de fato —
+   * consome dos lotes (FIFO por validade) e recalcula produto.estoque_atual.
+   * Antes só criava a movimentação e o estoque ficava intacto (superestimado).
    */
   async baixarKit(kitId, observacao = '') {
     const disponibilidade = await this.verificarDisponibilidadeKit(kitId)
-    
+
     if (!disponibilidade.disponivel) {
       throw new Error('Kit não disponível em estoque')
     }
-    
+
     const itens = await this.getKitItens(kitId)
     const movimentacoes = []
-    
+
     for (const item of itens) {
-      const movimentacao = await this.createMovimentacao({
-        produto_id: item.produto_id,
-        tipo: 'saida',
-        quantidade: item.quantidade,
-        motivo: 'Baixa de Kit',
-        kit_id: kitId,
-        observacao
-      })
-      movimentacoes.push(movimentacao)
+      // Consumir dos lotes com quantidade disponível, vencimento mais próximo primeiro (FIFO)
+      const lotes = (await this.getLotesByProduto(item.produto_id))
+        .filter(l => (l.quantidade_atual || 0) > 0)
+        .sort((a, b) => new Date(a.data_validade || '9999-12-31') - new Date(b.data_validade || '9999-12-31'))
+
+      let restante = item.quantidade
+      for (const lote of lotes) {
+        if (restante <= 0) break
+        const consumir = Math.min(lote.quantidade_atual, restante)
+        await this.updateLote(lote.id, { quantidade_atual: lote.quantidade_atual - consumir })
+        restante -= consumir
+
+        const movimentacao = await this.createMovimentacao({
+          produto_id: item.produto_id,
+          lote_id: lote.id,
+          tipo: 'saida',
+          quantidade: consumir,
+          motivo: 'Baixa de Kit',
+          kit_id: kitId,
+          observacao
+        })
+        movimentacoes.push(movimentacao)
+      }
+
+      if (restante > 0) {
+        // Sem lotes suficientes (estoque_atual do produto estava dessincronizado):
+        // registra a diferença como movimentação sem lote para rastreabilidade
+        const movimentacao = await this.createMovimentacao({
+          produto_id: item.produto_id,
+          tipo: 'saida',
+          quantidade: restante,
+          motivo: 'Baixa de Kit (sem lote — estoque dessincronizado)',
+          kit_id: kitId,
+          observacao
+        })
+        movimentacoes.push(movimentacao)
+      }
+
+      // Recalcular estoque_atual do produto a partir dos lotes
+      const lotesAtualizados = await this.getLotesByProduto(item.produto_id)
+      const novoEstoque = lotesAtualizados.reduce((sum, l) => sum + (l.quantidade_atual || 0), 0)
+      await this.updateProduto(item.produto_id, { estoque_atual: novoEstoque })
     }
-    
+
     return movimentacoes
   }
 
@@ -330,32 +366,33 @@ class EstoqueDataService {
    * 🆕 NOVO: Gera alertas automáticos - INCLUINDO ESTOQUE POR LOCALIZAÇÃO
    */
   async gerarAlertas() {
-    console.log('🔔 Iniciando geração de alertas...')
     const alertasGerados = []
-    
+
     try {
+      // OTIMIZAÇÃO: buscar alertas existentes e produtos UMA vez (antes era um
+      // getAll completo de alertas dentro de cada iteração — N+1 de coleção inteira)
+      const alertasExistentes = await this.getAlertas()
+      const produtosTodos = await this.getProdutos()
+      const produtosById = new Map(produtosTodos.map(p => [p.id, p]))
+
       // 1. ALERTAS DE VALIDADE
-      console.log('📅 Verificando alertas de validade...')
       const diasParaAlertar = [30, 60, 90]
-      
+
       for (const dias of diasParaAlertar) {
-        console.log(`   Verificando produtos vencendo em ${dias} dias...`)
         const lotesVencendo = await this.getLotesVencendo(dias)
-        console.log(`   Encontrados ${lotesVencendo.length} lotes vencendo em ${dias} dias`)
-        
+
         for (const lote of lotesVencendo) {
           try {
-            const produto = await this.getProdutoById(lote.produto_id)
-            
+            const produto = produtosById.get(lote.produto_id)
+
             if (produto) {
-              const alertasExistentes = await this.getAlertas()
-              const alertaExistente = alertasExistentes.find(a => 
-                a.lote_id === lote.id && 
-                a.tipo === 'validade' && 
+              const alertaExistente = alertasExistentes.find(a =>
+                a.lote_id === lote.id &&
+                a.tipo === 'validade' &&
                 a.dias_vencimento === dias &&
                 !a.visualizado
               )
-              
+
               if (!alertaExistente) {
                 const alerta = await this.createAlerta({
                   tipo: 'validade',
@@ -366,9 +403,9 @@ class EstoqueDataService {
                   lote_id: lote.id,
                   dias_vencimento: dias
                 })
-                
+
                 alertasGerados.push(alerta)
-                console.log(`   ✅ Alerta de validade criado: ${produto.nome_comercial}`)
+                alertasExistentes.push(alerta)
               }
             }
           } catch (error) {
@@ -378,25 +415,18 @@ class EstoqueDataService {
       }
       
       // 2. ALERTAS DE ESTOQUE MÍNIMO GERAL (do produto)
-      console.log('📦 Verificando alertas de estoque mínimo geral...')
-      const produtos = await this.getProdutos()
-      console.log(`   Analisando ${produtos.length} produtos...`)
-      
-      let produtosComProblema = 0
-      
-      for (const produto of produtos) {
+      for (const produto of produtosTodos) {
         try {
           const estoqueAtual = produto.estoque_atual || 0
           const estoqueMinimo = produto.estoque_minimo || 0
-          
+
           if (estoqueMinimo > 0 && estoqueAtual <= estoqueMinimo) {
-            const alertasExistentes = await this.getAlertas()
-            const alertaExistente = alertasExistentes.find(a => 
-              a.produto_id === produto.id && 
+            const alertaExistente = alertasExistentes.find(a =>
+              a.produto_id === produto.id &&
               a.tipo === 'estoque_minimo' &&
               !a.visualizado
             )
-            
+
             if (!alertaExistente) {
               const alerta = await this.createAlerta({
                 tipo: 'estoque_minimo',
@@ -405,34 +435,27 @@ class EstoqueDataService {
                 mensagem: `${produto.nome_comercial} - Estoque atual: ${estoqueAtual} / Mínimo: ${estoqueMinimo}`,
                 produto_id: produto.id
               })
-              
+
               alertasGerados.push(alerta)
-              produtosComProblema++
-              console.log(`   ✅ Alerta de estoque criado: ${produto.nome_comercial} (${estoqueAtual}/${estoqueMinimo})`)
+              alertasExistentes.push(alerta)
             }
           }
         } catch (error) {
           console.error(`   ❌ Erro ao processar produto ${produto.id}:`, error)
         }
       }
-      
-      console.log(`   Total de produtos com estoque baixo: ${produtosComProblema}`)
-      
+
       // 🆕 3. ALERTAS DE ESTOQUE MÍNIMO POR LOCALIZAÇÃO
-      console.log('🏪 Gerando alertas de estoque por localização...')
       try {
         const resultadoLocal = await estoqueMinimoPorLocalService.gerarAlertasAutomaticos(this)
-        
+
         if (resultadoLocal.success) {
           alertasGerados.push(...resultadoLocal.alertas)
-          console.log(`   ✅ ${resultadoLocal.total} alertas de localização criados`)
         }
       } catch (error) {
         console.error('   ❌ Erro ao gerar alertas de localização:', error)
       }
-      
-      console.log(`🎉 Geração de alertas concluída! Total: ${alertasGerados.length} novos alertas`)
-      
+
       return alertasGerados
       
     } catch (error) {

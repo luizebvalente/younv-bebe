@@ -285,9 +285,11 @@ class EstoqueMinimoPorLocalService {
       const analise = await this.analisarEstoqueBaixo(estoqueDataService)
       const alertasGerados = []
 
+      // Buscar alertas existentes UMA vez (antes era um getAll completo por item — N+1)
+      const alertasExistentes = await estoqueDataService.getAlertas()
+
       for (const item of analise.alertas) {
         // Verificar se já existe alerta não visualizado para este produto + local
-        const alertasExistentes = await estoqueDataService.getAlertas()
         const alertaExistente = alertasExistentes.find(a =>
           a.produto_id === item.produto_id &&
           a.estoque_id === item.estoque_id &&
@@ -314,7 +316,7 @@ class EstoqueMinimoPorLocalService {
           })
 
           alertasGerados.push(alerta)
-          console.log(`✅ Alerta criado: ${item.produto_nome} em ${item.estoque_nome}`)
+          alertasExistentes.push(alerta)
         }
       }
 

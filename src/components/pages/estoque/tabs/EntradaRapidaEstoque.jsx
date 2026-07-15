@@ -54,23 +54,40 @@ export default function EntradaRapidaEstoque({ produto, estoques, onSuccess }) {
         throw new Error('Data de validade é obrigatória')
       }
 
-      // Criar o lote
-      const numeroLote = formData.numero_lote || `LOTE-${Date.now()}`
-      const loteData = {
-        produto_id: produto.id,
-        numero_lote: numeroLote,
-        quantidade_inicial: quantidade,
-        data_validade: formData.data_validade,
-        data_fabricacao: new Date().toISOString().split('T')[0],
-        estoque_id: formData.estoque_id || null,
-        fornecedor_lote: formData.fornecedor_lote || '',
-        nota_fiscal: formData.nota_fiscal || '',
-        valor_compra: parseFloat(formData.valor_compra) || 0
+      // Localização obrigatória: lote sem estoque_id contava no estoque total mas
+      // ficava INVISÍVEL para Baixa e Transferência (que filtram por localização)
+      if (!formData.estoque_id) {
+        throw new Error('Selecione a localização (estoque) da entrada')
       }
 
-      console.log('📋 Criando lote:', loteData)
-      const loteCreated = await estoqueDataService.createLote(loteData)
-      console.log('✅ Lote criado:', loteCreated)
+      // Mesclar com lote existente de mesmo número na mesma localização
+      // (antes cada entrada criava um lote novo, duplicando o mesmo lote físico)
+      const numeroLote = formData.numero_lote || `LOTE-${Date.now()}`
+      const lotesExistentes = await estoqueDataService.getLotesByProduto(produto.id)
+      const loteExistente = formData.numero_lote
+        ? lotesExistentes.find(l => l.numero_lote === numeroLote && l.estoque_id === formData.estoque_id)
+        : null
+
+      if (loteExistente) {
+        await estoqueDataService.updateLote(loteExistente.id, {
+          quantidade_atual: (loteExistente.quantidade_atual || 0) + quantidade,
+          quantidade_inicial: (loteExistente.quantidade_inicial || 0) + quantidade,
+          data_validade: formData.data_validade || loteExistente.data_validade
+        })
+      } else {
+        const loteData = {
+          produto_id: produto.id,
+          numero_lote: numeroLote,
+          quantidade_inicial: quantidade,
+          data_validade: formData.data_validade,
+          data_fabricacao: new Date().toISOString().split('T')[0],
+          estoque_id: formData.estoque_id,
+          fornecedor_lote: formData.fornecedor_lote || '',
+          nota_fiscal: formData.nota_fiscal || '',
+          valor_compra: parseFloat(formData.valor_compra) || 0
+        }
+        await estoqueDataService.createLote(loteData)
+      }
 
       // Atualizar estoque do produto de forma simples e direta
       const estoqueAtual = produto.estoque_atual || 0

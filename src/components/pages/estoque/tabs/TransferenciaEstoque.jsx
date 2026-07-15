@@ -223,19 +223,19 @@ export default function TransferenciaEstoque({
       })
 
       // 3. CRIAR OU ATUALIZAR LOTE NO DESTINO
-      const loteDestinoExistente = lotes.find(l => 
+      const loteDestinoExistente = lotes.find(l =>
         l.numero_lote === loteInfo.numero_lote &&
         l.estoque_id === formData.estoque_destino_id &&
         l.produto_id === formData.produto_id
       )
 
+      let loteDestinoId
       if (loteDestinoExistente) {
         const novaQuantidadeLoteDestino = (loteDestinoExistente.quantidade_atual || 0) + quantidade
-        console.log(`📦 Atualizando lote existente no destino: ${loteDestinoExistente.quantidade_atual} + ${quantidade} = ${novaQuantidadeLoteDestino}`)
-        
         await estoqueDataService.updateLote(loteDestinoExistente.id, {
           quantidade_atual: novaQuantidadeLoteDestino
         })
+        loteDestinoId = loteDestinoExistente.id
       } else {
         const novoLoteDestino = {
           produto_id: formData.produto_id,
@@ -249,15 +249,15 @@ export default function TransferenciaEstoque({
           nota_fiscal: loteInfo.nota_fiscal,
           valor_compra: loteInfo.valor_compra
         }
-
-        console.log('📦 Criando novo lote no destino:', novoLoteDestino)
-        await estoqueDataService.createLote(novoLoteDestino)
+        const criado = await estoqueDataService.createLote(novoLoteDestino)
+        loteDestinoId = criado?.id
       }
 
       // 4. CRIAR MOVIMENTAÇÃO DE ENTRADA (no estoque de destino)
+      // lote_id = lote do DESTINO (antes usava o da origem e o histórico do destino saía errado)
       const movimentacaoEntrada = {
         produto_id: formData.produto_id,
-        lote_id: formData.lote_id,
+        lote_id: loteDestinoId || formData.lote_id,
         tipo: 'entrada',
         quantidade: quantidade,
         motivo: `Transferência de: ${estoqueOrigem.nome}`,
