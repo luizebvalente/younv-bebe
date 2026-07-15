@@ -37,12 +37,28 @@ function normalizePhone(phone) {
   return cleaned;
 }
 
-export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+// SEGURANÇA: endpoint destrutivo — exige segredo compartilhado.
+// Sem ADMIN_API_SECRET configurado no Vercel, o endpoint fica DESABILITADO.
+function checkAdminSecret(req, res) {
+  const secret = process.env.ADMIN_API_SECRET;
+  if (!secret) {
+    res.status(503).json({ error: 'Endpoint desabilitado: configure ADMIN_API_SECRET nas variáveis de ambiente do Vercel.' });
+    return false;
+  }
+  const provided = req.headers['x-admin-secret'] || req.query.secret;
+  if (provided !== secret) {
+    res.status(401).json({ error: 'Não autorizado.' });
+    return false;
+  }
+  return true;
+}
 
+export default async function handler(req, res) {
   if (req.method !== 'GET') {
     return res.status(405).json({ error: 'Use GET' });
   }
+
+  if (!checkAdminSecret(req, res)) return;
 
   const confirmDelete = req.query.confirm === 'true';
 

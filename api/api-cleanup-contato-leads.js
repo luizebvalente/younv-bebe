@@ -51,22 +51,31 @@ function getDataRegistro(data) {
   return new Date(0); // Data muito antiga como fallback
 }
 
-export default async function handler(req, res) {
-  // Configurar CORS
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
+// SEGURANÇA: endpoint destrutivo — exige segredo compartilhado.
+// Sem ADMIN_API_SECRET configurado no Vercel, o endpoint fica DESABILITADO.
+function checkAdminSecret(req, res) {
+  const secret = process.env.ADMIN_API_SECRET;
+  if (!secret) {
+    res.status(503).json({ error: 'Endpoint desabilitado: configure ADMIN_API_SECRET nas variáveis de ambiente do Vercel.' });
+    return false;
   }
+  const provided = req.headers['x-admin-secret'] || req.query.secret;
+  if (provided !== secret) {
+    res.status(401).json({ error: 'Não autorizado.' });
+    return false;
+  }
+  return true;
+}
 
+export default async function handler(req, res) {
   if (req.method !== 'GET') {
     return res.status(405).json({
       success: false,
       error: 'Método não permitido. Use GET.'
     });
   }
+
+  if (!checkAdminSecret(req, res)) return;
 
   try {
     const { confirm } = req.query;

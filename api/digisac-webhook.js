@@ -89,6 +89,18 @@ export default async function handler(req, res) {
     });
   }
 
+  // SEGURANÇA (opcional, retrocompatível): se DIGISAC_WEBHOOK_TOKEN estiver
+  // configurado no Vercel, exigir o token na query (?token=) ou no header.
+  // Sem a env var, o comportamento permanece o atual (aberto) para não quebrar
+  // a integração até o token ser configurado no Digisac.
+  const webhookToken = process.env.DIGISAC_WEBHOOK_TOKEN;
+  if (webhookToken) {
+    const provided = req.query.token || req.headers['x-webhook-token'];
+    if (provided !== webhookToken) {
+      return res.status(401).json({ success: false, error: 'Token inválido' });
+    }
+  }
+
   try {
     // VALIDAR PAYLOAD
     const payload = req.body;
@@ -127,10 +139,12 @@ export default async function handler(req, res) {
     
     if (!contactData.phone) {
       console.warn('⚠️ Não foi possível obter telefone do contato');
-      
+
       // Criar lead mesmo sem telefone (usando contactId como identificador)
-      contactData.phone = `ID-${contactData.contactId}`;
-      contactData.name = `Contato ${contactData.contactId.substring(0, 8)}`;
+      // Guard: contactId pode vir undefined em payloads malformados (evita 500)
+      const cid = String(contactData.contactId || 'desconhecido');
+      contactData.phone = `ID-${cid}`;
+      contactData.name = `Contato ${cid.substring(0, 8)}`;
       
       console.log('ℹ️ Criando lead sem telefone:', {
         name: contactData.name,
@@ -238,8 +252,8 @@ async function extractContactData(payload) {
       // Telefone sem formatação
       contactData.name = `Contato ${contactData.phone}`;
     } else {
-      // Sem telefone
-      contactData.name = `Contato ${contactId.substring(0, 8)}`;
+      // Sem telefone (guard para contactId undefined)
+      contactData.name = `Contato ${String(contactId || 'desconhecido').substring(0, 8)}`;
     }
   }
 
@@ -524,7 +538,15 @@ function getPhoneVariations(phone) {
  */
 function buildLeadData(contactData) {
   const now = new Date().toISOString();
-  
+
+  // dataRegistroContato SEMPRE como string ISO — o timestamp do Digisac pode vir
+  // como epoch/formatos diversos, e tipos mistos quebram o orderBy da lista de leads
+  let dataRegistro = now;
+  if (contactData.messageTimestamp) {
+    const parsed = new Date(contactData.messageTimestamp);
+    if (!isNaN(parsed.getTime())) dataRegistro = parsed.toISOString();
+  }
+
   return {
     // Dados básicos do contato
     nomePackiente: contactData.name,
@@ -546,15 +568,15 @@ function buildLeadData(contactData) {
     especialidadeId: '',
     procedimentoAgendadoId: '',
     
-    // Outros profissionais
+    // Outros profissionais (estrutura completa de 7 campos — igual ao frontend)
     outrosProfissionaisAgendados: false,
     quaisProfissionais: '',
     outrosProfissionais: [
-      { medicoId: '', especialidadeId: '', dataAgendamento: '', ativo: false },
-      { medicoId: '', especialidadeId: '', dataAgendamento: '', ativo: false },
-      { medicoId: '', especialidadeId: '', dataAgendamento: '', ativo: false },
-      { medicoId: '', especialidadeId: '', dataAgendamento: '', ativo: false },
-      { medicoId: '', especialidadeId: '', dataAgendamento: '', ativo: false }
+      { medicoId: '', especialidadeId: '', procedimentoId: '', dataAgendamento: '', valorAgendamento: '', localAgendado: '', ativo: false },
+      { medicoId: '', especialidadeId: '', procedimentoId: '', dataAgendamento: '', valorAgendamento: '', localAgendado: '', ativo: false },
+      { medicoId: '', especialidadeId: '', procedimentoId: '', dataAgendamento: '', valorAgendamento: '', localAgendado: '', ativo: false },
+      { medicoId: '', especialidadeId: '', procedimentoId: '', dataAgendamento: '', valorAgendamento: '', localAgendado: '', ativo: false },
+      { medicoId: '', especialidadeId: '', procedimentoId: '', dataAgendamento: '', valorAgendamento: '', localAgendado: '', ativo: false }
     ],
     
     // Financeiro
@@ -576,8 +598,8 @@ function buildLeadData(contactData) {
     observacaoGeral: `Contato recebido via WhatsApp em ${new Date().toLocaleString('pt-BR')}\n\nMensagem: ${contactData.messageText || 'N/A'}`,
     perfilComportamentalDisc: '',
     
-    // Datas
-    dataRegistroContato: contactData.messageTimestamp,
+    // Datas (ISO normalizado)
+    dataRegistroContato: dataRegistro,
     dataUltimaAlteracao: now,
     
     // Tags (usar ID do documento da tag no Firebase)
