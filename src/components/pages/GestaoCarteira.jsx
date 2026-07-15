@@ -12,7 +12,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { useAuth } from '@/contexts/AuthContext'
 import firebaseDataService from '@/services/firebaseDataService'
 import HistoricoVisitas from '@/components/pages/HistoricoVisitas'
-import { LEAD_STATUSES, STATUS_COLORS } from '@/constants/crm'
+import { LEAD_STATUSES, STATUS_COLORS, parseLocalDate } from '@/constants/crm'
 
 export default function GestaoCarteira() {
   const { user } = useAuth()
@@ -183,7 +183,9 @@ export default function GestaoCarteira() {
     const catMap = {}
     categories.forEach(c => { catMap[c.id] = c })
 
-    leads.forEach(lead => {
+    // uniqueLeads (dedup por telefone) — usar `leads` cru contava o mesmo paciente
+    // 2x nas categorias e inflava lista_pacientes/total_pacientes das carteiras automáticas
+    uniqueLeads.forEach(lead => {
       // Filtro por especialidade
       if (catEspecialidade !== 'all') {
         const temEspecialidade = lead.especialidade_id === catEspecialidade ||
@@ -191,11 +193,12 @@ export default function GestaoCarteira() {
         if (!temEspecialidade) return
       }
 
-      // Aniversariantes
+      // Aniversariantes (parseLocalDate: 'YYYY-MM-DD' como local — nascido dia 1º
+      // do mês caía no mês anterior com o parse UTC)
       if (lead.data_nascimento) {
         try {
-          const bday = new Date(lead.data_nascimento)
-          if (!isNaN(bday.getTime()) && bday.getMonth() === catMesAniversario) {
+          const bday = parseLocalDate(lead.data_nascimento)
+          if (bday && !isNaN(bday.getTime()) && bday.getMonth() === catMesAniversario) {
             catMap.aniversariantes.pacientes.push(lead)
           }
         } catch (e) {}
@@ -228,7 +231,7 @@ export default function GestaoCarteira() {
     })
 
     return categories
-  }, [leads, catMesAniversario, catAnoAniversario, catDiasInativo, catDiasPreInativo, catDiasPosConsulta, catDiasPosProcedimento, catEspecialidade])
+  }, [uniqueLeads, catMesAniversario, catAnoAniversario, catDiasInativo, catDiasPreInativo, catDiasPosConsulta, catDiasPosProcedimento, catEspecialidade])
 
   // Criar carteira automatica a partir de categoria
   const handleCriarCarteiraAutomatica = async (categoria) => {
@@ -315,7 +318,7 @@ export default function GestaoCarteira() {
       if (filtroValorMinGasto) {
         const min = parseFloat(filtroValorMinGasto)
         if (!isNaN(min)) {
-          const totalGasto = (lead.valor_total_gasto || 0) + (lead.total_gasto_produtos || 0) + (lead.status === 'Convertido' ? (lead.valor_orcado || 0) : 0)
+          const totalGasto = (parseFloat(lead.valor_total_gasto) || 0) + (parseFloat(lead.total_gasto_produtos) || 0) + (lead.status === 'Convertido' ? (parseFloat(lead.valor_orcado) || 0) : 0)
           if (totalGasto < min) return false
         }
       }
@@ -484,7 +487,7 @@ export default function GestaoCarteira() {
           const dataAlteracao = l.data_ultima_alteracao ? new Date(l.data_ultima_alteracao) : null
           return dataAlteracao && dataAlteracao > dataCriacao
         })
-        .reduce((sum, l) => sum + (l.valor_orcado || 0), 0)
+        .reduce((sum, l) => sum + (parseFloat(l.valor_orcado) || 0), 0)
 
       const updatedPerformance = {
         totalReativados: reativados,

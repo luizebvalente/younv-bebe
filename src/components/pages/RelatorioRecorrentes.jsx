@@ -56,7 +56,7 @@ import {
     TableRow,
 } from '@/components/ui/table'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
-import { Flame, AlertCircle, PhoneOff, Snowflake, ArrowUp, Coins, BellRing, Search } from 'lucide-react'
+import { Flame, AlertCircle, AlertTriangle, PhoneOff, Snowflake, ArrowUp, Coins, BellRing, Search } from 'lucide-react'
 import html2canvas from 'html2canvas'
 import * as XLSX from 'xlsx'
 import firebaseDataService from '@/services/firebaseDataService'
@@ -130,13 +130,15 @@ export default function RelatorioRecorrentes() {
         if (periodFilter.startDate || periodFilter.endDate) {
             filtered = filtered.filter(lead => {
                 const dataRegistro = new Date(getDateField(lead))
+                // 'T00:00:00'/'T23:59:59' sem sufixo Z = horário LOCAL — new Date('YYYY-MM-DD')
+                // puro era UTC e deslocava o início do período ~3h para o dia anterior (BRT)
                 if (periodFilter.startDate && periodFilter.endDate) {
-                    return dataRegistro >= new Date(periodFilter.startDate) &&
-                        dataRegistro <= new Date(periodFilter.endDate + 'T23:59:59')
+                    return dataRegistro >= new Date(periodFilter.startDate + 'T00:00:00') &&
+                        dataRegistro <= new Date(periodFilter.endDate + 'T23:59:59.999')
                 } else if (periodFilter.startDate) {
-                    return dataRegistro >= new Date(periodFilter.startDate)
+                    return dataRegistro >= new Date(periodFilter.startDate + 'T00:00:00')
                 } else if (periodFilter.endDate) {
-                    return dataRegistro <= new Date(periodFilter.endDate + 'T23:59:59')
+                    return dataRegistro <= new Date(periodFilter.endDate + 'T23:59:59.999')
                 }
                 return true
             })

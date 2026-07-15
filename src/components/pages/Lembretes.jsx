@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge'
 import { useAuth } from '@/contexts/AuthContext'
 import firebaseDataService from '@/services/firebaseDataService'
+import { parseLocalDate } from '@/constants/crm'
 
 export default function Lembretes() {
   // ESTADOS PRINCIPAIS
@@ -54,10 +55,14 @@ export default function Lembretes() {
     }
   }
 
-  // FUNÇÃO PARA OBTER LEAD PELO ID
-  const getLeadById = (leadId) => {
-    return leads.find(lead => lead.id === leadId)
-  }
+  // Mapa id→lead: lookup O(1) (antes era find() linear chamado por lembrete no filtro E no render)
+  const leadsById = useMemo(() => {
+    const map = new Map()
+    leads.forEach(lead => map.set(lead.id, lead))
+    return map
+  }, [leads])
+
+  const getLeadById = (leadId) => leadsById.get(leadId)
 
   // FUNÇÃO PARA MARCAR LEMBRETE COMO CONCLUÍDO
   const handleConcluirLembrete = async (lembreteId) => {
@@ -97,13 +102,15 @@ export default function Lembretes() {
   }
 
   // FUNÇÃO PARA DETERMINAR STATUS DO LEMBRETE
+  // parseLocalDate: 'YYYY-MM-DD' como data LOCAL — com new Date() (UTC) um lembrete
+  // de HOJE aparecia como "Vencido" no fuso do Brasil
   const getStatusLembrete = (lembrete) => {
     if (lembrete.status === 'Concluído') return 'Concluído'
-    
-    const dataLembrete = new Date(lembrete.data_lembrete)
+
+    const dataLembrete = parseLocalDate(lembrete.data_lembrete)
     const hoje = new Date()
     hoje.setHours(0, 0, 0, 0)
-    
+
     if (dataLembrete < hoje) return 'Vencido'
     return 'Pendente'
   }
@@ -122,23 +129,23 @@ export default function Lembretes() {
     }
   }
 
-  // FUNÇÃO PARA FORMATAR DATA
+  // FUNÇÃO PARA FORMATAR DATA (parse local — evita exibir 1 dia antes)
   const formatarData = (dataString) => {
     if (!dataString) return '-'
-    const data = new Date(dataString)
+    const data = parseLocalDate(dataString)
     return data.toLocaleDateString('pt-BR')
   }
 
   // FUNÇÃO PARA VERIFICAR SE É HOJE
   const isHoje = (dataString) => {
-    const data = new Date(dataString)
+    const data = parseLocalDate(dataString)
     const hoje = new Date()
     return data.toDateString() === hoje.toDateString()
   }
 
   // FUNÇÃO PARA VERIFICAR SE É AMANHÃ
   const isAmanha = (dataString) => {
-    const data = new Date(dataString)
+    const data = parseLocalDate(dataString)
     const amanha = new Date()
     amanha.setDate(amanha.getDate() + 1)
     return data.toDateString() === amanha.toDateString()
@@ -174,7 +181,7 @@ export default function Lembretes() {
       hoje.setHours(0, 0, 0, 0)
       
       filtered = filtered.filter(lembrete => {
-        const dataLembrete = new Date(lembrete.data_lembrete)
+        const dataLembrete = parseLocalDate(lembrete.data_lembrete)
         dataLembrete.setHours(0, 0, 0, 0)
         
         switch (dateFilter) {

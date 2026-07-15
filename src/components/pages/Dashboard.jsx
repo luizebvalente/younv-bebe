@@ -19,7 +19,7 @@ import { Users, UserPlus, Calendar, TrendingUp, DollarSign, Target, Activity, Lo
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import firebaseDataService from '@/services/firebaseDataService'
-import { STATUS_COLORS } from '@/constants/crm'
+import { STATUS_COLORS, isLeadConvertido } from '@/constants/crm'
 
 const Dashboard = () => {
   const [leads, setLeads] = useState([])
@@ -49,13 +49,6 @@ const Dashboard = () => {
       setMedicos(medicosData)
       setEspecialidades(especialidadesData)
       setProcedimentos(procedimentosData)
-      
-      console.log('📊 Dados carregados no Dashboard:', {
-        leads: leadsData.length,
-        medicos: medicosData.length,
-        especialidades: especialidadesData.length,
-        procedimentos: procedimentosData.length
-      })
     } catch (err) {
       console.error('Erro ao carregar dados do dashboard:', err)
       setError('Erro ao carregar dados do dashboard. Tente novamente.')
@@ -65,25 +58,21 @@ const Dashboard = () => {
   }
 
   // Cálculos para métricas
+  // isLeadConvertido: critério ÚNICO de conversão em todas as telas
+  // (antes o card "Taxa de Conversão" e o card "Receita" ao lado usavam definições diferentes)
   const totalLeads = leads.length
   const agendados = leads.filter(l => l.agendado).length
-  const convertidos = leads.filter(l => l.status === 'Convertido').length
+  const leadsConvertidos = leads.filter(isLeadConvertido)
+  const convertidos = leadsConvertidos.length
   const taxaConversao = totalLeads > 0 ? ((convertidos / totalLeads) * 100).toFixed(1) : 0
-  const valorTotal = leads.reduce((sum, lead) => sum + (lead.valor_orcado || 0), 0)
 
   // Total em R$ de conversões (Convertido = valor_orcado; Convertido Parcial = valor_fechado_parcial)
-  const leadsConvertidos = leads.filter(l =>
-    l.status === 'Convertido' ||
-    l.orcamento_fechado === 'Total' ||
-    l.orcamento_fechado === 'Parcial'
-  )
   const valorConversoes = leadsConvertidos.reduce((sum, l) => {
     if (l.orcamento_fechado === 'Parcial') {
       return sum + (parseFloat(l.valor_fechado_parcial) || 0)
     }
     return sum + (parseFloat(l.valor_orcado) || 0)
   }, 0)
-  const ticketMedioConversao = leadsConvertidos.length > 0 ? valorConversoes / leadsConvertidos.length : 0
 
   // CORREÇÃO COMPLETA: Função para normalizar data (sem horário)
   const normalizarData = (data) => {
@@ -93,33 +82,12 @@ const Dashboard = () => {
 
   // CORREÇÃO: Cálculo de leads cadastrados hoje - VERSÃO CORRIGIDA
   const leadsHoje = leads.filter(lead => {
-    if (!lead.data_registro_contato) {
-      console.log('❌ Lead sem data_registro_contato:', lead.nome_paciente)
-      return false
-    }
-    
+    if (!lead.data_registro_contato) return false
     try {
       const hoje = normalizarData(new Date())
       const dataLead = normalizarData(lead.data_registro_contato)
-      
-      const isToday = hoje.getTime() === dataLead.getTime()
-      
-      if (isToday) {
-        console.log('✅ Lead de hoje encontrado:', {
-          nome: lead.nome_paciente,
-          data_registro: lead.data_registro_contato,
-          data_normalizada: dataLead.toISOString(),
-          hoje_normalizado: hoje.toISOString()
-        })
-      }
-      
-      return isToday
-    } catch (error) {
-      console.error('❌ Erro ao processar data do lead:', {
-        nome: lead.nome_paciente,
-        data: lead.data_registro_contato,
-        erro: error.message
-      })
+      return hoje.getTime() === dataLead.getTime()
+    } catch {
       return false
     }
   }).length
@@ -144,46 +112,37 @@ const Dashboard = () => {
   // Diferença entre hoje e ontem
   const diferencaHojeOntem = leadsHoje - leadsOntem
 
-  // Debug para acompanhar as estatísticas
-  console.log('📊 Estatísticas de leads calculadas:', {
-    total: totalLeads,
-    hoje: leadsHoje,
-    ontem: leadsOntem,
-    diferenca: diferencaHojeOntem,
-    amostra_leads: leads.slice(0, 3).map(l => ({
-      nome: l.nome_paciente,
-      data: l.data_registro_contato,
-      data_normalizada: l.data_registro_contato ? normalizarData(l.data_registro_contato).toISOString() : null
-    }))
-  })
-
   // === MÉTRICAS DE RECORRÊNCIA ===
-  const leadsRecorrentes = leads.filter(l => l.tipo_visita === 'Recorrente' || (l.total_visitas || 0) > 1)
-  const leadsPrimeiraVez = leads.filter(l => l.tipo_visita === 'Primeira Visita' || (!l.tipo_visita && (l.total_visitas || 0) <= 1))
+  // Classificação EXCLUSIVA: novo = não-recorrente. Antes um lead com
+  // tipo_visita='Primeira Visita' e total_visitas>1 contava nos DOIS grupos
+  // (a soma da pizza passava de 100%).
+  const isRecorrente = (l) => l.tipo_visita === 'Recorrente' || (l.total_visitas || 0) > 1
+  const leadsRecorrentes = leads.filter(isRecorrente)
+  const leadsPrimeiraVez = leads.filter(l => !isRecorrente(l))
   const taxaRecorrencia = totalLeads > 0 ? ((leadsRecorrentes.length / totalLeads) * 100).toFixed(1) : 0
 
-  const convertidosRecorrentes = leadsRecorrentes.filter(l => l.status === 'Convertido' || l.orcamento_fechado === 'Total' || l.orcamento_fechado === 'Parcial').length
-  const convertidosPrimeiraVez = leadsPrimeiraVez.filter(l => l.status === 'Convertido' || l.orcamento_fechado === 'Total' || l.orcamento_fechado === 'Parcial').length
+  const convertidosRecorrentes = leadsRecorrentes.filter(isLeadConvertido).length
+  const convertidosPrimeiraVez = leadsPrimeiraVez.filter(isLeadConvertido).length
   const taxaConversaoRecorrentes = leadsRecorrentes.length > 0 ? ((convertidosRecorrentes / leadsRecorrentes.length) * 100).toFixed(1) : 0
   const taxaConversaoPrimeiraVez = leadsPrimeiraVez.length > 0 ? ((convertidosPrimeiraVez / leadsPrimeiraVez.length) * 100).toFixed(1) : 0
 
   const receitaRecorrentes = leadsRecorrentes.reduce((sum, l) => {
-    const valorVisitas = l.valor_total_visitas || 0
-    const valorProdutos = l.total_gasto_produtos || 0
-    const valorGasto = l.valor_total_gasto || (valorVisitas + valorProdutos)
-    return sum + (valorGasto > 0 ? valorGasto : (l.valor_orcado || 0))
+    const valorVisitas = Number(l.valor_total_visitas) || 0
+    const valorProdutos = Number(l.total_gasto_produtos) || 0
+    const valorGasto = Number(l.valor_total_gasto) || (valorVisitas + valorProdutos)
+    return sum + (valorGasto > 0 ? valorGasto : (Number(l.valor_orcado) || 0))
   }, 0)
 
-  const receitaPrimeiraVez = leadsPrimeiraVez.reduce((sum, l) => sum + (l.valor_orcado || 0), 0)
+  const receitaPrimeiraVez = leadsPrimeiraVez.reduce((sum, l) => sum + (Number(l.valor_orcado) || 0), 0)
 
   // === RANKING POR INDICADORES ===
   // Ranking de médicos por volume e conversão
   const rankingMedicos = medicos.map(medico => {
     const medicoLeads = leads.filter(l => l.medico_agendado_id === medico.id)
-    const medicoConvertidos = medicoLeads.filter(l => l.status === 'Convertido' || l.orcamento_fechado === 'Total' || l.orcamento_fechado === 'Parcial')
+    const medicoConvertidos = medicoLeads.filter(isLeadConvertido)
     const medicoReceita = medicoConvertidos.reduce((sum, l) => {
-      if (l.orcamento_fechado === 'Parcial') return sum + (l.valor_fechado_parcial || 0)
-      return sum + (l.valor_orcado || 0)
+      if (l.orcamento_fechado === 'Parcial') return sum + (Number(l.valor_fechado_parcial) || 0)
+      return sum + (Number(l.valor_orcado) || 0)
     }, 0)
     return {
       nome: medico.nome,
@@ -201,9 +160,9 @@ const Dashboard = () => {
       const canal = lead.canal_contato || 'Não informado'
       if (!canaisMap[canal]) canaisMap[canal] = { nome: canal, totalLeads: 0, convertidos: 0, receita: 0 }
       canaisMap[canal].totalLeads++
-      if (lead.status === 'Convertido' || lead.orcamento_fechado === 'Total' || lead.orcamento_fechado === 'Parcial') {
+      if (isLeadConvertido(lead)) {
         canaisMap[canal].convertidos++
-        canaisMap[canal].receita += lead.orcamento_fechado === 'Parcial' ? (lead.valor_fechado_parcial || 0) : (lead.valor_orcado || 0)
+        canaisMap[canal].receita += lead.orcamento_fechado === 'Parcial' ? (Number(lead.valor_fechado_parcial) || 0) : (Number(lead.valor_orcado) || 0)
       }
     })
     return Object.values(canaisMap).map(c => ({
@@ -214,9 +173,7 @@ const Dashboard = () => {
 
   // Ticket Medio Global
   const ticketMedioGlobal = (() => {
-    const convertidos = leads.filter(l =>
-      l.status === 'Convertido' || l.orcamento_fechado === 'Total' || l.orcamento_fechado === 'Parcial'
-    )
+    const convertidos = leads.filter(isLeadConvertido)
     if (convertidos.length === 0) return 0
     const totalReceita = convertidos.reduce((sum, l) => {
       const consulta = parseFloat(l.valor_consulta) || 0
@@ -282,7 +239,7 @@ const Dashboard = () => {
       const end = new Date(now.getFullYear(), now.getMonth() - i + 1, 0, 23, 59, 59)
       const leadsDoMes = leads.filter(l => {
         const d = new Date(l.data_registro_contato)
-        return d >= start && d <= end && (l.status === 'Convertido' || l.orcamento_fechado === 'Total' || l.orcamento_fechado === 'Parcial')
+        return d >= start && d <= end && isLeadConvertido(l)
       })
       const receita = leadsDoMes.reduce((sum, l) => sum + (parseFloat(l.valor_orcado) || 0), 0)
       months.push(receita)
@@ -299,8 +256,8 @@ const Dashboard = () => {
 
   const COLORS_PIE = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#ec4899']
 
-  // Leads recentes (últimos 5)
-  const leadsRecentes = leads
+  // Leads recentes (últimos 5) — cópia antes do sort para não mutar o estado no render
+  const leadsRecentes = [...leads]
     .sort((a, b) => new Date(b.data_registro_contato) - new Date(a.data_registro_contato))
     .slice(0, 5)
 
@@ -635,12 +592,12 @@ const Dashboard = () => {
         <CardContent>
           <div className="text-3xl font-bold text-gray-900">
             {formatCurrency(
-              leads.filter(l => l.status === 'Convertido').reduce((sum, l) => sum + (l.valor_orcado || 0), 0) +
-              leads.reduce((sum, l) => sum + (l.total_gasto_produtos || 0), 0)
+              leads.filter(isLeadConvertido).reduce((sum, l) => sum + (Number(l.valor_orcado) || 0), 0) +
+              leads.reduce((sum, l) => sum + (Number(l.total_gasto_produtos) || 0), 0)
             )}
           </div>
           <p className="text-sm text-gray-600 mt-2">
-            {formatCurrency(leads.filter(l => l.status === 'Convertido').reduce((sum, l) => sum + (l.valor_orcado || 0), 0))} em procedimentos + {formatCurrency(leads.reduce((sum, l) => sum + (l.total_gasto_produtos || 0), 0))} em produtos
+            {formatCurrency(leads.filter(isLeadConvertido).reduce((sum, l) => sum + (Number(l.valor_orcado) || 0), 0))} em procedimentos + {formatCurrency(leads.reduce((sum, l) => sum + (Number(l.total_gasto_produtos) || 0), 0))} em produtos
           </p>
         </CardContent>
       </Card>

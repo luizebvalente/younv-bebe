@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { 
   BarChart, 
@@ -50,7 +50,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import html2canvas from 'html2canvas'
 import firebaseDataService from '@/services/firebaseDataService'
-import { STATUS_COLORS } from '@/constants/crm'
+import { STATUS_COLORS, isLeadConvertido, parseLocalDate } from '@/constants/crm'
 
 const Relatorios = () => {
   const printRef = useRef(null)
@@ -146,10 +146,12 @@ const Relatorios = () => {
           return
       }
       
+      // Formatar como data LOCAL — toISOString() é UTC e à noite (BRT) pulava para o dia seguinte
+      const toLocalYMD = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
       setPeriodFilter(prev => ({
         ...prev,
-        startDate: startDate.toISOString().split('T')[0],
-        endDate: endDate.toISOString().split('T')[0]
+        startDate: toLocalYMD(startDate),
+        endDate: toLocalYMD(endDate)
       }))
     }
   }, [periodFilter.quickFilter])
@@ -164,7 +166,9 @@ const Relatorios = () => {
   }, [periodFilter.startDate, periodFilter.endDate, leads, dateFilterType])
 
   // Aplicar filtros combinados (período + tags + médico)
-  const getFilteredLeads = () => {
+  // MEMOIZADO: getFilteredLeads() é chamado dezenas de vezes por render (cards, gráficos,
+  // tabelas). Sem memo, cada chamada re-filtrava a lista inteira de leads — O(chamadas × leads).
+  const filteredLeadsMemo = useMemo(() => {
     let filtered = leads
 
     // Filtro por período
@@ -174,7 +178,7 @@ const Relatorios = () => {
 
     // Filtro por tags
     if (showTagFilter && selectedTagsFilter.length > 0) {
-      filtered = filtered.filter(lead => 
+      filtered = filtered.filter(lead =>
         lead.tags && selectedTagsFilter.some(tagId => lead.tags.includes(tagId))
       )
     }
@@ -193,7 +197,9 @@ const Relatorios = () => {
     }
 
     return filtered
-  }
+  }, [leads, showPeriodFilter, periodFilter.startDate, periodFilter.endDate, filteredByPeriodLeads, showTagFilter, selectedTagsFilter, selectedMedicoFilter, selectedProcedimentoFilter])
+
+  const getFilteredLeads = () => filteredLeadsMemo
 
   const loadData = async () => {
     try {
@@ -229,9 +235,11 @@ const Relatorios = () => {
       return
     }
     
-    const start = new Date(periodFilter.startDate)
+    // parseLocalDate: 'YYYY-MM-DD' como data LOCAL — new Date('YYYY-MM-DD') é UTC
+    // e deslocava a janela inteira 1 dia para trás no fuso do Brasil
+    const start = parseLocalDate(periodFilter.startDate)
     start.setHours(0, 0, 0, 0)
-    const end = new Date(periodFilter.endDate)
+    const end = parseLocalDate(periodFilter.endDate)
     end.setHours(23, 59, 59, 999)
     
     const filtered = leads.filter(lead => {
@@ -310,11 +318,11 @@ const Relatorios = () => {
       const stats = {
         total: filteredLeadsData.length,
         agendados: filteredLeadsData.filter(l => l.agendado).length,
-        convertidos: filteredLeadsData.filter(l => l.status === 'Convertido').length,
-        valorTotal: filteredLeadsData.reduce((sum, lead) => sum + (lead.valor_orcado || 0), 0),
+        convertidos: filteredLeadsData.filter(isLeadConvertido).length,
+        valorTotal: filteredLeadsData.reduce((sum, lead) => sum + (Number(lead.valor_orcado) || 0), 0),
         valorConvertido: filteredLeadsData
-          .filter(l => l.status === 'Convertido')
-          .reduce((sum, lead) => sum + (lead.valor_orcado || 0), 0)
+          .filter(isLeadConvertido)
+          .reduce((sum, lead) => sum + (Number(lead.valor_orcado) || 0), 0)
       }
 
       // Capturar todos os gráficos como imagens
@@ -337,7 +345,9 @@ const Relatorios = () => {
       }
 
       // Capturar os cards de métricas principais
-      const metricsCards = document.querySelectorAll('.grid.grid-cols-2.md\\:grid-cols-3.lg\\:grid-cols-6 > div')
+      // Seletor corrigido para as classes reais da grade de métricas (o antigo não batia
+      // com o DOM e a seção "Métricas Detalhadas" saía vazia no PDF)
+      const metricsCards = document.querySelectorAll('.grid.grid-cols-1.md\\:grid-cols-2.lg\\:grid-cols-6 > div')
       const metricsImages = []
       
       for (let i = 0; i < metricsCards.length; i++) {
@@ -827,8 +837,8 @@ const Relatorios = () => {
       const leadsComTag = getFilteredLeads().filter(lead => 
         lead.tags && lead.tags.includes(tag.id)
       )
-      const convertidos = leadsComTag.filter(lead => lead.status === 'Convertido')
-      
+      const convertidos = leadsComTag.filter(isLeadConvertido)
+
       return {
         nome: tag.nome,
         total: leadsComTag.length,
@@ -845,10 +855,10 @@ const Relatorios = () => {
       const leadsComTag = getFilteredLeads().filter(lead => 
         lead.tags && lead.tags.includes(tag.id)
       )
-      const valorTotal = leadsComTag.reduce((sum, lead) => sum + (lead.valor_orcado || 0), 0)
+      const valorTotal = leadsComTag.reduce((sum, lead) => sum + (Number(lead.valor_orcado) || 0), 0)
       const valorConvertido = leadsComTag
-        .filter(lead => lead.status === 'Convertido')
-        .reduce((sum, lead) => sum + (lead.valor_orcado || 0), 0)
+        .filter(isLeadConvertido)
+        .reduce((sum, lead) => sum + (Number(lead.valor_orcado) || 0), 0)
       
       return {
         nome: tag.nome,
@@ -870,7 +880,7 @@ const Relatorios = () => {
         lead.tags && lead.tags.includes(tag.id)
       )
       
-      const sortedLeads = tagLeads.sort((a, b) => {
+      const sortedLeads = [...tagLeads].sort((a, b) => {
         const dateA = new Date(a.data_registro_contato || 0)
         const dateB = new Date(b.data_registro_contato || 0)
         return dateB - dateA
@@ -924,17 +934,20 @@ const Relatorios = () => {
   const analyzePatientTypes = () => {
     const leadsToAnalyze = getFilteredLeads()
     
-    const novos = leadsToAnalyze.filter(lead => lead.tipo_visita === 'Primeira Visita')
-    const recorrentes = leadsToAnalyze.filter(lead => lead.tipo_visita === 'Recorrente')
-    
-    const valorNovos = novos.reduce((sum, lead) => sum + (lead.valor_orcado || 0), 0)
-    const valorRecorrentes = recorrentes.reduce((sum, lead) => sum + (lead.valor_orcado || 0), 0)
-    
-    const convertidosNovos = novos.filter(lead => lead.status === 'Convertido')
-    const convertidosRecorrentes = recorrentes.filter(lead => lead.status === 'Convertido')
-    
-    const valorConvertidoNovos = convertidosNovos.reduce((sum, lead) => sum + (lead.valor_orcado || 0), 0)
-    const valorConvertidoRecorrentes = convertidosRecorrentes.reduce((sum, lead) => sum + (lead.valor_orcado || 0), 0)
+    // Classificação exclusiva com fallback: lead sem tipo_visita entra pelo total_visitas
+    // (antes o match exato deixava leads com tipo_visita vazio fora dos DOIS grupos)
+    const isRecorrente = (lead) => lead.tipo_visita === 'Recorrente' || (lead.total_visitas || 0) > 1
+    const recorrentes = leadsToAnalyze.filter(isRecorrente)
+    const novos = leadsToAnalyze.filter(lead => !isRecorrente(lead))
+
+    const valorNovos = novos.reduce((sum, lead) => sum + (Number(lead.valor_orcado) || 0), 0)
+    const valorRecorrentes = recorrentes.reduce((sum, lead) => sum + (Number(lead.valor_orcado) || 0), 0)
+
+    const convertidosNovos = novos.filter(isLeadConvertido)
+    const convertidosRecorrentes = recorrentes.filter(isLeadConvertido)
+
+    const valorConvertidoNovos = convertidosNovos.reduce((sum, lead) => sum + (Number(lead.valor_orcado) || 0), 0)
+    const valorConvertidoRecorrentes = convertidosRecorrentes.reduce((sum, lead) => sum + (Number(lead.valor_orcado) || 0), 0)
     
     return {
       novos: {
@@ -993,7 +1006,7 @@ const Relatorios = () => {
       
       const medicoLeads = getFilteredLeads().filter(lead => lead.medico_agendado_id === medico.id)
       
-      const sortedLeads = medicoLeads.sort((a, b) => {
+      const sortedLeads = [...medicoLeads].sort((a, b) => {
         const dateA = new Date(a.data_registro_contato || 0)
         const dateB = new Date(b.data_registro_contato || 0)
         return dateB - dateA
@@ -1044,21 +1057,24 @@ const Relatorios = () => {
   }
 
   // Cálculos para métricas (agora usando leads filtrados)
+  // isLeadConvertido: critério ÚNICO de conversão (status OU orçamento fechado),
+  // alinhado com Dashboard e RelatorioRecorrentes — antes cada tela mostrava um número.
   const leadsToAnalyze = getFilteredLeads()
   const totalLeads = leadsToAnalyze.length
   const agendados = leadsToAnalyze.filter(l => l.agendado).length
-  const convertidos = leadsToAnalyze.filter(l => l.status === 'Convertido').length
+  const convertidos = leadsToAnalyze.filter(isLeadConvertido).length
   const taxaConversao = totalLeads > 0 ? ((convertidos / totalLeads) * 100).toFixed(1) : 0
-  const valorTotal = leadsToAnalyze.reduce((sum, lead) => sum + (lead.valor_orcado || 0), 0)
+  const valorTotal = leadsToAnalyze.reduce((sum, lead) => sum + (Number(lead.valor_orcado) || 0), 0)
   const valorConvertido = leadsToAnalyze
-    .filter(l => l.status === 'Convertido')
-    .reduce((sum, lead) => sum + (lead.valor_orcado || 0), 0)
+    .filter(isLeadConvertido)
+    .reduce((sum, lead) => sum + (Number(lead.valor_orcado) || 0), 0)
 
   // Dados para gráficos (agora usando leads filtrados)
   const leadsPorCanal = () => {
     const canais = {}
     leadsToAnalyze.forEach(lead => {
-      canais[lead.canal_contato] = (canais[lead.canal_contato] || 0) + 1
+      const canal = lead.canal_contato || 'Não informado'
+      canais[canal] = (canais[canal] || 0) + 1
     })
     return Object.entries(canais).map(([canal, quantidade]) => ({
       canal,
@@ -1085,7 +1101,7 @@ const Relatorios = () => {
         nome: medico.nome,
         id: medico.id,
         total: medicoLeads.length,
-        convertidos: medicoLeads.filter(lead => lead.status === 'Convertido').length,
+        convertidos: medicoLeads.filter(isLeadConvertido).length,
         medico: medico
       }
     })
@@ -1093,16 +1109,23 @@ const Relatorios = () => {
   }
 
   const leadsPorMes = () => {
+    // Chave ordenável YYYY-MM: antes o slice(-6) pegava os 6 meses mais ANTIGOS
+    // (a ordem vinha da iteração desc dos leads) e o eixo saía invertido
     const meses = {}
     leadsToAnalyze.forEach(lead => {
+      if (!lead.data_registro_contato) return
       const data = new Date(lead.data_registro_contato)
-      const mesAno = `${data.getMonth() + 1}/${data.getFullYear()}`
-      meses[mesAno] = (meses[mesAno] || 0) + 1
+      if (isNaN(data.getTime())) return
+      const chave = `${data.getFullYear()}-${String(data.getMonth() + 1).padStart(2, '0')}`
+      meses[chave] = (meses[chave] || 0) + 1
     })
-    return Object.entries(meses).map(([mes, quantidade]) => ({
-      mes,
-      quantidade
-    })).slice(-6)
+    return Object.entries(meses)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .slice(-6)
+      .map(([chave, quantidade]) => ({
+        mes: `${chave.slice(5)}/${chave.slice(0, 4)}`,
+        quantidade
+      }))
   }
 
   const formatCurrency = (value) => {
@@ -1132,11 +1155,11 @@ const Relatorios = () => {
 
   // === CÁLCULOS DE INVESTIMENTO TOTAL NA CLÍNICA ===
   const totalProcedimentos = leadsToAnalyze
-    .filter(l => l.status === 'Convertido')
-    .reduce((sum, l) => sum + (l.valor_orcado || 0), 0)
+    .filter(isLeadConvertido)
+    .reduce((sum, l) => sum + (Number(l.valor_orcado) || 0), 0)
 
   const totalProdutos = leadsToAnalyze
-    .reduce((sum, l) => sum + (l.total_gasto_produtos || 0), 0)
+    .reduce((sum, l) => sum + (Number(l.total_gasto_produtos) || 0), 0)
 
   const totalGeralInvestido = totalProcedimentos + totalProdutos
 
@@ -1159,10 +1182,10 @@ const Relatorios = () => {
       const chave = `${data.getFullYear()}-${String(data.getMonth() + 1).padStart(2, '0')}`
 
       if (meses[chave]) {
-        if (lead.status === 'Convertido') {
-          meses[chave].procedimentos += (lead.valor_orcado || 0)
+        if (isLeadConvertido(lead)) {
+          meses[chave].procedimentos += (Number(lead.valor_orcado) || 0)
         }
-        meses[chave].produtos += (lead.total_gasto_produtos || 0)
+        meses[chave].produtos += (Number(lead.total_gasto_produtos) || 0)
       }
     })
 
@@ -1171,13 +1194,17 @@ const Relatorios = () => {
 
   // Top 10 pacientes por valor investido
   const top10Investimento = leadsToAnalyze
-    .map(lead => ({
-      nome: lead.nome_paciente,
-      telefone: lead.telefone,
-      procedimentos: lead.status === 'Convertido' ? (lead.valor_orcado || 0) : 0,
-      produtos: lead.total_gasto_produtos || 0,
-      total: (lead.status === 'Convertido' ? (lead.valor_orcado || 0) : 0) + (lead.total_gasto_produtos || 0)
-    }))
+    .map(lead => {
+      const proc = isLeadConvertido(lead) ? (Number(lead.valor_orcado) || 0) : 0
+      const prod = Number(lead.total_gasto_produtos) || 0
+      return {
+        nome: lead.nome_paciente,
+        telefone: lead.telefone,
+        procedimentos: proc,
+        produtos: prod,
+        total: proc + prod
+      }
+    })
     .filter(p => p.total > 0)
     .sort((a, b) => b.total - a.total)
     .slice(0, 10)
@@ -1587,7 +1614,7 @@ const Relatorios = () => {
                       Receita Potencial Total
                     </h4>
                     <p className="text-2xl font-bold text-purple-600 mb-2">
-                      {formatCurrency(getFilteredLeads().reduce((sum, lead) => sum + (lead.valor_orcado || 0), 0))}
+                      {formatCurrency(getFilteredLeads().reduce((sum, lead) => sum + (Number(lead.valor_orcado) || 0), 0))}
                     </p>
                     <p className="text-sm text-purple-700">
                       <strong>Ação:</strong> Valor total em jogo. Maximize o aproveitamento de cada lead.

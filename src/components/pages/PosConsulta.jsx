@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { useAuth } from '@/contexts/AuthContext'
 import firebaseDataService from '@/services/firebaseDataService'
+import { parseLocalDate } from '@/constants/crm'
 
 export default function PosConsulta() {
   const { user } = useAuth()
@@ -93,7 +94,7 @@ export default function PosConsulta() {
     }
 
     if (filtroDataInicio) {
-      const start = new Date(filtroDataInicio)
+      const start = parseLocalDate(filtroDataInicio)
       start.setHours(0, 0, 0, 0)
       filtered = filtered.filter(r => {
         const data = r.data_criacao ? new Date(r.data_criacao) : null
@@ -102,7 +103,7 @@ export default function PosConsulta() {
     }
 
     if (filtroDataFim) {
-      const end = new Date(filtroDataFim)
+      const end = parseLocalDate(filtroDataFim)
       end.setHours(23, 59, 59, 999)
       filtered = filtered.filter(r => {
         const data = r.data_criacao ? new Date(r.data_criacao) : null
@@ -121,7 +122,8 @@ export default function PosConsulta() {
   const formatDate = (dateString) => {
     if (!dateString) return 'N/A'
     try {
-      return new Date(dateString).toLocaleDateString('pt-BR')
+      // parseLocalDate: 'YYYY-MM-DD' como data local (evita exibir 1 dia antes)
+      return parseLocalDate(dateString).toLocaleDateString('pt-BR')
     } catch {
       return 'Data inválida'
     }
