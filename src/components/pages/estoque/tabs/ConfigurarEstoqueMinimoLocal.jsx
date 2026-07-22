@@ -205,7 +205,7 @@ export default function ConfigurarEstoqueMinimoLocal() {
       </Button>
 
       <Dialog open={isOpen} onOpenChange={setIsOpen}>
-        <DialogContent className="max-w-8xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-[min(88rem,calc(100%-2rem))] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Settings className="h-5 w-5 text-blue-600" />

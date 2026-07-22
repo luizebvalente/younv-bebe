@@ -2607,7 +2607,7 @@ const Relatorios = () => {
       {/* Modal de Leads por Médico */}
       {showMedicoLeads && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg max-w-6xl w-full max-h-[90vh] overflow-hidden">
+          <div className="bg-white rounded-lg max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col">
             <div className="p-6 border-b bg-gray-50">
               <div className="flex items-center justify-between mb-4">
                 <div>
@@ -2660,7 +2660,7 @@ const Relatorios = () => {
               </div>
             </div>
 
-            <div className="p-6 overflow-y-auto max-h-[calc(90vh-120px)]">
+            <div className="p-6 overflow-y-auto flex-1 min-h-0">
               {loadingMedicoLeads ? (
                 <div className="flex items-center justify-center py-12">
                   <Loader2 className="h-8 w-8 animate-spin" />
@@ -2783,7 +2783,7 @@ const Relatorios = () => {
       {/* Modal de Leads por Tag */}
       {showTagLeads && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg max-w-6xl w-full max-h-[90vh] overflow-hidden">
+          <div className="bg-white rounded-lg max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col">
             <div className="p-6 border-b bg-gray-50">
               <div className="flex items-center justify-between mb-4">
                 <div>
@@ -2842,7 +2842,7 @@ const Relatorios = () => {
               </div>
             </div>
 
-            <div className="p-6 overflow-y-auto max-h-[calc(90vh-120px)]">
+            <div className="p-6 overflow-y-auto flex-1 min-h-0">
               {loadingTagLeads ? (
                 <div className="flex items-center justify-center py-12">
                   <Loader2 className="h-8 w-8 animate-spin" />
