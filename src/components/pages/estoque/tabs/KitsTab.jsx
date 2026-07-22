@@ -272,7 +272,7 @@ export default function KitsTab() {
                   Novo Kit
                 </Button>
               </DialogTrigger>
-              <DialogContent className="max-w-xl">
+              <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
                   <DialogTitle>
                     {editingItem ? 'Editar Kit' : 'Novo Kit'}

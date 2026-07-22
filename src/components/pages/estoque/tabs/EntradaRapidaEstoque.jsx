@@ -166,7 +166,7 @@ export default function EntradaRapidaEstoque({ produto, estoques, onSuccess }) {
       </Button>
 
       <Dialog open={isOpen} onOpenChange={setIsOpen}>
-        <DialogContent className="max-w-xl">
+        <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Package className="h-5 w-5 text-green-600" />

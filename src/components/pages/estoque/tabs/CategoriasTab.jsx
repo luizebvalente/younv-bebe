@@ -153,7 +153,7 @@ export default function CategoriasTab() {
                   Nova Categoria
                 </Button>
               </DialogTrigger>
-              <DialogContent className="max-w-md">
+              <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
                   <DialogTitle>
                     {editingItem ? 'Editar Categoria' : 'Nova Categoria'}
