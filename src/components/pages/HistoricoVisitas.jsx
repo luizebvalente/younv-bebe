@@ -39,7 +39,13 @@ import {
 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import firebaseDataService from '@/services/firebaseDataService'
-import { TIPOS_VISITA, STATUS_VISITA, parseLocalDate } from '@/constants/crm'
+import {
+  TIPOS_VISITA,
+  LEAD_STATUSES,
+  STATUS_COLORS,
+  STATUS_VISITA_COLORS,
+  parseLocalDate
+} from '@/constants/crm'
 
 /**
  * 📋 COMPONENTE DE HISTÓRICO DE VISITAS/PASSAGENS DO PACIENTE
@@ -74,6 +80,13 @@ export default function HistoricoVisitas({ pacienteId, paciente, onUpdate, trigg
 
   const { user } = useAuth()
 
+  // Cada visita/passagem registra em que status o lead estava naquele momento,
+  // por isso o campo usa a MESMA lista de status do lead. Uma nova visita começa
+  // no status atual do lead — o ponto de partida mais informativo — e o usuário
+  // ajusta (ex.: marcar 'Convertido' na passagem em que fechou).
+  const statusPadraoVisita = () =>
+    LEAD_STATUSES.includes(paciente?.status) ? paciente.status : 'Agendado'
+
   // Formulário de nova visita
   const [visitaForm, setVisitaForm] = useState({
     data_visita: new Date().toISOString().split('T')[0],
@@ -84,9 +97,20 @@ export default function HistoricoVisitas({ pacienteId, paciente, onUpdate, trigg
     valor: '',
     local: '',
     observacoes: '',
-    status: 'Realizada',
+    status: statusPadraoVisita(),
     tags: []
   })
+
+  // Visitas antigas foram gravadas com a lista anterior ('Realizada', 'Agendada',
+  // 'Cancelada', 'Remarcada'). Esses valores não existem em LEAD_STATUSES: sem
+  // acrescentá-los, editar uma visita antiga deixaria o campo vazio e trocaria o
+  // status dela sem o usuário perceber.
+  const statusDisponiveis = useMemo(() => {
+    if (visitaForm.status && !LEAD_STATUSES.includes(visitaForm.status)) {
+      return [...LEAD_STATUSES, visitaForm.status]
+    }
+    return LEAD_STATUSES
+  }, [visitaForm.status])
 
   useEffect(() => {
     if (isOpen) {
@@ -191,7 +215,7 @@ export default function HistoricoVisitas({ pacienteId, paciente, onUpdate, trigg
       valor: '',
       local: '',
       observacoes: '',
-      status: 'Realizada',
+      status: statusPadraoVisita(),
       tags: []
     })
     setTagSearchTerm('')
@@ -322,7 +346,7 @@ export default function HistoricoVisitas({ pacienteId, paciente, onUpdate, trigg
       valor: visita.valor?.toString() || '',
       local: visita.local || '',
       observacoes: visita.observacoes || '',
-      status: visita.status || 'Realizada',
+      status: visita.status || statusPadraoVisita(),
       tags: visita.tags || []
     })
     setIsAddingVisita(true)
@@ -520,15 +544,10 @@ export default function HistoricoVisitas({ pacienteId, paciente, onUpdate, trigg
     return Object.values(agrupado).sort((a, b) => b.quantidade - a.quantidade).slice(0, 5)
   }, [historico])
 
+  // Cores do status do lead; STATUS_VISITA_COLORS cobre as visitas antigas,
+  // gravadas com a lista própria ('Realizada', 'Agendada', 'Cancelada', 'Remarcada')
   const getStatusColor = (status) => {
-    const colors = {
-      'Realizada': 'bg-green-100 text-green-800',
-      'Agendada': 'bg-blue-100 text-blue-800',
-      'Cancelada': 'bg-red-100 text-red-800',
-      'Faltou': 'bg-orange-100 text-orange-800',
-      'Remarcada': 'bg-yellow-100 text-yellow-800'
-    }
-    return colors[status] || 'bg-gray-100 text-gray-800'
+    return STATUS_COLORS[status] || STATUS_VISITA_COLORS[status] || 'bg-gray-100 text-gray-800'
   }
 
   return (
@@ -1006,7 +1025,7 @@ export default function HistoricoVisitas({ pacienteId, paciente, onUpdate, trigg
                             <SelectValue placeholder="Selecione" />
                           </SelectTrigger>
                           <SelectContent>
-                            {STATUS_VISITA.map(s => (
+                            {statusDisponiveis.map(s => (
                               <SelectItem key={s} value={s}>{s}</SelectItem>
                             ))}
                           </SelectContent>
@@ -1205,7 +1224,7 @@ export default function HistoricoVisitas({ pacienteId, paciente, onUpdate, trigg
                               </TableCell>
                               <TableCell>
                                 <Badge className={getStatusColor(visita.status)}>
-                                  {visita.status || 'Realizada'}
+                                  {visita.status || '—'}
                                 </Badge>
                               </TableCell>
                               <TableCell>

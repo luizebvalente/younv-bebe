@@ -195,7 +195,11 @@ export const TIPOS_VISITA = [
   'Outro',
 ]
 
-// --- Status de Visita ---
+// --- Status de Visita (LEGADO) ---
+// O formulário de visita usa LEAD_STATUSES: cada visita/passagem registra o status
+// do lead naquele momento, e a lista própria abaixo não tinha 'Convertido' e afins.
+// Mantida apenas para documentar os valores já gravados no histórico das visitas
+// antigas — STATUS_VISITA_COLORS continua colorindo esses registros.
 export const STATUS_VISITA = [
   'Realizada',
   'Agendada',
