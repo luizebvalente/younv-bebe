@@ -16,7 +16,10 @@ class EstoqueDataService {
     kitsItens: 'kits_itens',
     fornecedores: 'fornecedores',
     categorias: 'categorias_produtos',
-    alertas: 'alertas_estoque'
+    alertas: 'alertas_estoque',
+    // Coleções do CRM usadas pelo estoque (baixa por profissional / relatórios)
+    medicos: 'medicos',
+    especialidades: 'especialidades'
   }
 
   // ==================== PRODUTOS ====================
@@ -155,6 +158,43 @@ class EstoqueDataService {
     
     const result = await firebaseDataService.create(this.collections.movimentacoes, movimentacao)
     return result
+  }
+
+  // ==================== PROFISSIONAIS (MÉDICOS DO CRM) ====================
+
+  /**
+   * Médicos cadastrados no CRM, usados para atribuir a baixa a um profissional.
+   * Só retorna os ativos — cadastros inativos não devem aparecer na baixa.
+   */
+  async getMedicos() {
+    const medicos = await firebaseDataService.getAll(this.collections.medicos)
+    return medicos
+      .filter(m => m.ativo !== false)
+      .sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR'))
+  }
+
+  async getEspecialidades() {
+    return await firebaseDataService.getAll(this.collections.especialidades)
+  }
+
+  /**
+   * Saídas de estoque atribuídas a um profissional, opcionalmente restritas a
+   * um mês (mes: 0-11) e/ou ano. Movimentações sem medico_id ficam de fora.
+   */
+  async getMovimentacoesPorProfissional({ ano = null, mes = null, medicoId = null } = {}) {
+    const movimentacoes = await this.getMovimentacoes()
+
+    return movimentacoes.filter(mov => {
+      if (mov.tipo !== 'saida' || !mov.medico_id) return false
+      if (medicoId && mov.medico_id !== medicoId) return false
+      if (ano === null && mes === null) return true
+
+      const data = new Date(mov.data_movimentacao)
+      if (Number.isNaN(data.getTime())) return false
+      if (ano !== null && data.getFullYear() !== ano) return false
+      if (mes !== null && data.getMonth() !== mes) return false
+      return true
+    })
   }
 
   // ==================== KITS ====================

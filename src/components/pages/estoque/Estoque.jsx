@@ -11,7 +11,8 @@ import {
   Building2, 
   ArrowLeftRight, 
   MapPin,
-  FileText // 🆕 ADICIONADO: Ícone para Pedido de Compra
+  FileText, // 🆕 ADICIONADO: Ícone para Pedido de Compra
+  Stethoscope // 🆕 ADICIONADO: Ícone para Relatório por Profissional
 } from 'lucide-react'
 import ProdutosTab from './tabs/ProdutosTab'
 import LotesTab from './tabs/LotesTab'
@@ -24,6 +25,7 @@ import MovimentacoesTab from './tabs/MovimentacoesTab'
 import MapaEstoqueTab from './tabs/MapaEstoqueTab'
 import DashboardEstoque from './DashboardEstoque'
 import RelatorioPedidoCompra from './tabs/RelatorioPedidoCompra' // 🆕 ADICIONADO
+import RelatorioPorProfissional from './tabs/RelatorioPorProfissional' // 🆕 ADICIONADO
 
 export default function Estoque() {
   const [activeTab, setActiveTab] = useState('dashboard')
@@ -42,7 +44,7 @@ export default function Estoque() {
 
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="grid w-full grid-cols-5 lg:grid-cols-11 lg:w-auto lg:inline-grid">
+        <TabsList className="grid w-full grid-cols-5 lg:grid-cols-12 lg:w-auto lg:inline-grid">
           <TabsTrigger value="dashboard" className="flex items-center gap-2">
             <Package className="h-4 w-4" />
             <span className="hidden sm:inline">Dashboard</span>
@@ -82,6 +84,11 @@ export default function Estoque() {
           <TabsTrigger value="alertas" className="flex items-center gap-2">
             <AlertTriangle className="h-4 w-4" />
             <span className="hidden sm:inline">Alertas</span>
+          </TabsTrigger>
+          {/* 🆕 NOVA ABA: Relatório por Profissional */}
+          <TabsTrigger value="por-profissional" className="flex items-center gap-2 bg-gradient-to-r from-purple-50 to-fuchsia-50">
+            <Stethoscope className="h-4 w-4 text-purple-600" />
+            <span className="hidden sm:inline text-purple-700 font-semibold">Profissional</span>
           </TabsTrigger>
           {/* 🆕 NOVA ABA: Pedido de Compra */}
           <TabsTrigger value="pedido-compra" className="flex items-center gap-2 bg-gradient-to-r from-green-50 to-emerald-50">
@@ -128,6 +135,11 @@ export default function Estoque() {
 
         <TabsContent value="alertas" className="mt-6">
           <AlertasTab />
+        </TabsContent>
+
+        {/* 🆕 NOVO CONTEÚDO: Relatório por Profissional */}
+        <TabsContent value="por-profissional" className="mt-6">
+          <RelatorioPorProfissional />
         </TabsContent>
 
         {/* 🆕 NOVO CONTEÚDO: Pedido de Compra */}

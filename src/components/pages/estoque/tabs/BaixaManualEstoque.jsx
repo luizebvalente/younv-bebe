@@ -17,7 +17,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { MinusCircle, AlertCircle, Package, User, Calendar, MapPin, Search, Phone, Mail, X } from 'lucide-react'
+import { MinusCircle, AlertCircle, Package, User, Calendar, MapPin, Search, Phone, Mail, X, Stethoscope } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import estoqueDataService from '@/services/estoque/estoqueDataService'
 import firebaseDataService from '@/services/firebaseDataService'
@@ -36,9 +36,30 @@ function debounce(func, wait) {
   }
 }
 
+const MOTIVOS_BAIXA = [
+  'Uso em Paciente',
+  'Uso em Procedimento',
+  'Uso por Profissional',
+  'Amostra Grátis',
+  'Vencimento',
+  'Perda/Quebra',
+  'Devolução',
+  'Teste/Qualidade',
+  'Descarte',
+  'Transferência',
+  'Outro'
+]
+
+// Motivos que exigem a seleção de um paciente do CRM
+const MOTIVOS_COM_PACIENTE = ['Uso em Paciente', 'Uso em Procedimento']
+
+// Motivos que exigem a atribuição a um profissional (médico cadastrado no CRM).
+// Nos demais motivos o profissional continua disponível, porém opcional.
+const MOTIVOS_COM_PROFISSIONAL = ['Uso por Profissional']
+
 /**
  * 🆕 VERSÃO V2 - COM INTEGRAÇÃO AO CRM
- * 
+ *
  * Mudanças principais:
  * - Seleção de pacientes do CRM (ao invés de digitar manualmente)
  * - Registro automático de consumo no histórico do paciente
@@ -49,8 +70,9 @@ export default function BaixaManualEstoqueV2({ produto, estoques: estoquesProp, 
   const [isOpen, setIsOpen] = useState(false)
   const [lotes, setLotes] = useState([])
   const [estoques, setEstoques] = useState([])
-  const [pacientes, setPacientes] = useState([])
   const [pacientesFiltrados, setPacientesFiltrados] = useState([])
+  const [medicos, setMedicos] = useState([])
+  const [especialidades, setEspecialidades] = useState([])
   const [loading, setLoading] = useState(false)
   const [loadingPacientes, setLoadingPacientes] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -70,10 +92,15 @@ export default function BaixaManualEstoqueV2({ produto, estoques: estoquesProp, 
     paciente_id: '', // 🆕 ID do paciente selecionado
     paciente_nome: '',
     paciente_cpf: '',
+    // 🆕 Profissional (médico do CRM) a quem a baixa é debitada
+    medico_id: '',
+    medico_nome: '',
+    medico_crm: '',
+    medico_especialidade_id: '',
     valor_unitario: produto.valor_unitario || 0
   })
 
-  // Carregar estoques
+  // Carregar estoques e profissionais
   useEffect(() => {
     if (isOpen) {
       if (estoquesProp && estoquesProp.length > 0) {
@@ -81,6 +108,7 @@ export default function BaixaManualEstoqueV2({ produto, estoques: estoquesProp, 
       } else {
         loadEstoques()
       }
+      loadMedicos()
     }
   }, [isOpen, estoquesProp])
 
@@ -158,18 +186,25 @@ export default function BaixaManualEstoqueV2({ produto, estoques: estoquesProp, 
     }
   }, [showPacientesList])
 
-  const motivosBaixa = [
-    'Uso em Paciente',
-    'Uso em Procedimento',
-    'Amostra Grátis',
-    'Vencimento',
-    'Perda/Quebra',
-    'Devolução',
-    'Teste/Qualidade',
-    'Descarte',
-    'Transferência',
-    'Outro'
-  ]
+  const loadMedicos = async () => {
+    try {
+      const [medicosData, especialidadesData] = await Promise.all([
+        estoqueDataService.getMedicos(),
+        estoqueDataService.getEspecialidades()
+      ])
+      setMedicos(medicosData)
+      setEspecialidades(especialidadesData)
+    } catch (error) {
+      console.error('❌ Erro ao carregar profissionais:', error)
+      setMedicos([])
+      setEspecialidades([])
+    }
+  }
+
+  const getEspecialidadeNome = (id) => {
+    const especialidade = especialidades.find(e => e.id === id)
+    return especialidade ? especialidade.nome : ''
+  }
 
   const loadEstoques = async () => {
     try {
@@ -216,16 +251,55 @@ export default function BaixaManualEstoqueV2({ produto, estoques: estoquesProp, 
 
   // 🆕 Selecionar paciente
   const handleSelecionarPaciente = useCallback((paciente) => {
+    // Se o paciente já tem médico agendado no CRM, sugerir esse profissional —
+    // o usuário ainda pode trocar (quem executou pode não ser quem agendou)
+    const medicoDoPaciente = paciente.medico_agendado_id
+      ? medicos.find(m => m.id === paciente.medico_agendado_id)
+      : null
+
     setFormData(prev => ({
       ...prev,
       paciente_id: paciente.id,
       paciente_nome: paciente.nome_paciente,
       paciente_cpf: '',
-      motivo: 'Uso em Paciente' // Definir automaticamente
+      motivo: 'Uso em Paciente', // Definir automaticamente
+      ...(medicoDoPaciente && !prev.medico_id
+        ? {
+            medico_id: medicoDoPaciente.id,
+            medico_nome: medicoDoPaciente.nome || '',
+            medico_crm: medicoDoPaciente.crm || '',
+            medico_especialidade_id: medicoDoPaciente.especialidade_id || medicoDoPaciente.especialidadeId || ''
+          }
+        : {})
     }))
     setShowPacientesList(false)
     setSearchPaciente(paciente.nome_paciente) // Mostrar nome no input
-  }, [])
+  }, [medicos])
+
+  // 🆕 Selecionar profissional (médico do CRM)
+  const handleSelecionarMedico = useCallback((medicoId) => {
+    if (medicoId === 'nenhum') {
+      setFormData(prev => ({
+        ...prev,
+        medico_id: '',
+        medico_nome: '',
+        medico_crm: '',
+        medico_especialidade_id: ''
+      }))
+      return
+    }
+
+    const medico = medicos.find(m => m.id === medicoId)
+    if (!medico) return
+
+    setFormData(prev => ({
+      ...prev,
+      medico_id: medico.id,
+      medico_nome: medico.nome || '',
+      medico_crm: medico.crm || '',
+      medico_especialidade_id: medico.especialidade_id || medico.especialidadeId || ''
+    }))
+  }, [medicos])
 
   // 🆕 Registrar consumo no histórico do paciente
   const registrarConsumoNoPaciente = async (pacienteId, dadosConsumo) => {
@@ -246,6 +320,8 @@ export default function BaixaManualEstoqueV2({ produto, estoques: estoquesProp, 
         produto_id: dadosConsumo.produto_id,
         produto_nome: dadosConsumo.produto_nome,
         lote_numero: dadosConsumo.lote_numero,
+        medico_id: dadosConsumo.medico_id || '',
+        medico_nome: dadosConsumo.medico_nome || '',
         quantidade: dadosConsumo.quantidade,
         valor_unitario: dadosConsumo.valor_unitario,
         valor_total: dadosConsumo.quantidade * dadosConsumo.valor_unitario,
@@ -306,8 +382,13 @@ export default function BaixaManualEstoqueV2({ produto, estoques: estoquesProp, 
       }
 
       // 🆕 Validar paciente se motivo for "Uso em Paciente"
-      if ((formData.motivo === 'Uso em Paciente' || formData.motivo === 'Uso em Procedimento') && !formData.paciente_id) {
+      if (MOTIVOS_COM_PACIENTE.includes(formData.motivo) && !formData.paciente_id) {
         throw new Error('Selecione um paciente para registrar o consumo')
+      }
+
+      // 🆕 Validar profissional quando o motivo exigir
+      if (MOTIVOS_COM_PROFISSIONAL.includes(formData.motivo) && !formData.medico_id) {
+        throw new Error('Selecione o profissional para debitar esta baixa')
       }
 
       const lote = lotes.find(l => l.id === formData.lote_id)
@@ -348,6 +429,11 @@ export default function BaixaManualEstoqueV2({ produto, estoques: estoquesProp, 
         paciente_id: formData.paciente_id || '',
         paciente_nome: formData.paciente_nome || '',
         paciente_cpf: formData.paciente_cpf || '',
+        // 🆕 Profissional a quem a baixa foi debitada (base do relatório Por Profissional)
+        medico_id: formData.medico_id || '',
+        medico_nome: formData.medico_nome || '',
+        medico_crm: formData.medico_crm || '',
+        medico_especialidade_id: formData.medico_especialidade_id || '',
         estoque_id: formData.estoque_id,
         estoque_nome: estoque.nome,
         usuario_id: userInfo.id,
@@ -399,6 +485,8 @@ export default function BaixaManualEstoqueV2({ produto, estoques: estoquesProp, 
           valor_unitario: formData.valor_unitario,
           estoque_nome: estoque.nome,
           usuario_nome: userInfo.nome,
+          medico_id: formData.medico_id,
+          medico_nome: formData.medico_nome,
           observacao: formData.observacao
         })
       }
@@ -415,6 +503,10 @@ export default function BaixaManualEstoqueV2({ produto, estoques: estoquesProp, 
         paciente_id: '',
         paciente_nome: '',
         paciente_cpf: '',
+        medico_id: '',
+        medico_nome: '',
+        medico_crm: '',
+        medico_especialidade_id: '',
         valor_unitario: produto.valor_unitario || 0
       })
       setIsOpen(false)
@@ -423,10 +515,15 @@ export default function BaixaManualEstoqueV2({ produto, estoques: estoquesProp, 
         await onSuccess()
       }
 
-      const mensagemSucesso = formData.paciente_id 
+      const linhaProfissional = formData.medico_nome
+        ? `Profissional: ${formData.medico_nome}\n`
+        : ''
+
+      const mensagemSucesso = formData.paciente_id
         ? `✅ Baixa realizada e registrada no histórico do paciente!\n\n` +
           `Produto: ${produto.nome_comercial}\n` +
           `Paciente: ${formData.paciente_nome}\n` +
+          linhaProfissional +
           `Localização: ${estoque.nome}\n` +
           `Lote: ${lote.numero_lote}\n` +
           `Quantidade: ${quantidade}\n` +
@@ -434,6 +531,7 @@ export default function BaixaManualEstoqueV2({ produto, estoques: estoquesProp, 
           `Estoque total: ${novoEstoqueTotal}`
         : `✅ Baixa realizada com sucesso!\n\n` +
           `Produto: ${produto.nome_comercial}\n` +
+          linhaProfissional +
           `Localização: ${estoque.nome}\n` +
           `Lote: ${lote.numero_lote}\n` +
           `Quantidade: ${quantidade}\n` +
@@ -462,6 +560,10 @@ export default function BaixaManualEstoqueV2({ produto, estoques: estoquesProp, 
       paciente_id: '',
       paciente_nome: '',
       paciente_cpf: '',
+      medico_id: '',
+      medico_nome: '',
+      medico_crm: '',
+      medico_especialidade_id: '',
       valor_unitario: produto.valor_unitario || 0
     })
     setLotes([])
@@ -472,9 +574,14 @@ export default function BaixaManualEstoqueV2({ produto, estoques: estoquesProp, 
 
   const loteEmUso = lotes.find(l => l.id === formData.lote_id)
   const estoqueEmUso = estoques.find(e => e.id === formData.estoque_id)
-  const pacienteSelecionado = formData.paciente_id 
-    ? pacientesFiltrados.find(p => p.id === formData.paciente_id) 
+  const pacienteSelecionado = formData.paciente_id
+    ? pacientesFiltrados.find(p => p.id === formData.paciente_id)
     : null
+  const medicoSelecionado = formData.medico_id
+    ? medicos.find(m => m.id === formData.medico_id)
+    : null
+  const pacienteObrigatorio = MOTIVOS_COM_PACIENTE.includes(formData.motivo)
+  const profissionalObrigatorio = MOTIVOS_COM_PROFISSIONAL.includes(formData.motivo)
 
   const formatDate = (dateString) => {
     if (!dateString) return '-'
@@ -700,7 +807,7 @@ export default function BaixaManualEstoqueV2({ produto, estoques: estoquesProp, 
                         <SelectValue placeholder="Selecione..." />
                       </SelectTrigger>
                       <SelectContent>
-                        {motivosBaixa.map((motivo) => (
+                        {MOTIVOS_BAIXA.map((motivo) => (
                           <SelectItem key={motivo} value={motivo}>
                             {motivo}
                           </SelectItem>
@@ -710,8 +817,79 @@ export default function BaixaManualEstoqueV2({ produto, estoques: estoquesProp, 
                   </div>
                 </div>
 
+                {/* 🆕 PROFISSIONAL — debita a baixa para um médico do CRM */}
+                <div
+                  className={`p-4 rounded-lg border space-y-3 ${
+                    profissionalObrigatorio
+                      ? 'bg-purple-50 border-purple-200'
+                      : 'bg-gray-50 border-gray-200'
+                  }`}
+                >
+                  <Label htmlFor="medico_id" className="flex items-center gap-2">
+                    <Stethoscope className="h-4 w-4 text-purple-600" />
+                    Profissional {profissionalObrigatorio ? '*' : '(opcional)'}
+                  </Label>
+
+                  {medicos.length === 0 ? (
+                    <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg text-sm text-yellow-800">
+                      <AlertCircle className="h-4 w-4 inline mr-2" />
+                      Nenhum profissional ativo cadastrado. Cadastre em Médicos para
+                      debitar baixas por profissional.
+                    </div>
+                  ) : (
+                    <>
+                      <Select
+                        value={formData.medico_id || 'nenhum'}
+                        onValueChange={handleSelecionarMedico}
+                      >
+                        <SelectTrigger id="medico_id">
+                          <SelectValue placeholder="Selecione o profissional..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="nenhum">Sem profissional</SelectItem>
+                          {medicos.map((medico) => (
+                            <SelectItem key={medico.id} value={medico.id}>
+                              {medico.nome}
+                              {medico.crm ? ` — CRM ${medico.crm}` : ''}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+
+                      <p className="text-xs text-gray-500">
+                        {profissionalObrigatorio
+                          ? 'Este motivo exige um profissional. O consumo entra no relatório Por Profissional.'
+                          : 'Informe o profissional para que este consumo apareça no relatório Por Profissional.'}
+                      </p>
+
+                      {medicoSelecionado && (
+                        <div className="p-3 bg-white rounded-lg border border-purple-200 text-sm">
+                          <div className="flex items-center gap-2">
+                            <Stethoscope className="h-4 w-4 text-purple-600" />
+                            <span className="font-semibold">{medicoSelecionado.nome}</span>
+                            {medicoSelecionado.crm && (
+                              <Badge variant="outline" className="text-xs">
+                                CRM {medicoSelecionado.crm}
+                              </Badge>
+                            )}
+                          </div>
+                          {getEspecialidadeNome(
+                            medicoSelecionado.especialidade_id || medicoSelecionado.especialidadeId
+                          ) && (
+                            <p className="text-xs text-gray-600 mt-1">
+                              {getEspecialidadeNome(
+                                medicoSelecionado.especialidade_id || medicoSelecionado.especialidadeId
+                              )}
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+
                 {/* 🆕 SELEÇÃO DE PACIENTE - VERSÃO OTIMIZADA */}
-                {(formData.motivo === 'Uso em Paciente' || formData.motivo === 'Uso em Procedimento') && (
+                {pacienteObrigatorio && (
                   <div className="p-4 bg-blue-50 rounded-lg border border-blue-200 space-y-4">
                     <div className="pacientes-search-container">
                       <p className="text-sm font-medium text-blue-800 mb-2">
@@ -925,6 +1103,12 @@ export default function BaixaManualEstoqueV2({ produto, estoques: estoquesProp, 
                           <strong>Paciente:</strong> {formData.paciente_nome}
                         </p>
                       )}
+                      {formData.medico_nome && (
+                        <p>
+                          <strong>Profissional:</strong> {formData.medico_nome}
+                          {formData.medico_crm ? ` (CRM ${formData.medico_crm})` : ''}
+                        </p>
+                      )}
                       {user && (
                         <p>
                           <strong>Responsável:</strong> {user.displayName || user.email}
@@ -942,7 +1126,13 @@ export default function BaixaManualEstoqueV2({ produto, estoques: estoquesProp, 
               </Button>
               <Button 
                 type="submit" 
-                disabled={saving || !formData.estoque_id || !formData.lote_id || ((formData.motivo === 'Uso em Paciente' || formData.motivo === 'Uso em Procedimento') && !formData.paciente_id)} 
+                disabled={
+                  saving ||
+                  !formData.estoque_id ||
+                  !formData.lote_id ||
+                  (pacienteObrigatorio && !formData.paciente_id) ||
+                  (profissionalObrigatorio && !formData.medico_id)
+                }
                 className="bg-red-600 hover:bg-red-700 text-white"
               >
                 {saving ? 'Processando...' : 'Confirmar Baixa'}
