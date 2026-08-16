@@ -127,6 +127,14 @@ class FirebaseDataService {
         pagouReserva: data.pagou_reserva || false,
         tipoVisita: data.tipo_visita || '',
         valorOrcado: data.valor_orcado || '',
+        // Parte digitada do orçamento (valorOrcado = esta base + valor das passagens).
+        // Sem a base explícita (create vindo de importação/webhook) a base É o próprio
+        // orçado — cair para 0 aqui zeraria o orçamento de quem foi criado por fora.
+        // parseFloat e não `|| 0`: base zerada precisa gravar 0, não '' — com '' o
+        // getOrcamentoBase cairia de volta no total e somaria as passagens de novo.
+        valorOrcadoBase: data.valor_orcado_base === undefined || data.valor_orcado_base === null || data.valor_orcado_base === ''
+          ? parseFloat(data.valor_orcado) || 0
+          : parseFloat(data.valor_orcado_base) || 0,
         orcamentoFechado: data.orcamento_fechado || '',
         valorConsulta: data.valor_consulta || '',
         valorTaxaReserva: data.valor_taxa_reserva || '',
@@ -305,6 +313,9 @@ class FirebaseDataService {
         pagou_reserva: data.pagouReserva || data.pagou_reserva,
         tipo_visita: data.tipoVisita || data.tipo_visita,
         valor_orcado: data.valorOrcado || data.valor_orcado,
+        // `?? null` e não `|| 0`: precisa diferenciar base 0 (gravada) de campo ausente
+        // (lead antigo), que é o caso em que getOrcamentoBase usa valor_orcado como base
+        valor_orcado_base: data.valorOrcadoBase ?? data.valor_orcado_base ?? null,
         orcamento_fechado: data.orcamentoFechado || data.orcamento_fechado,
         valor_consulta: data.valorConsulta || data.valor_consulta || '',
         valor_taxa_reserva: data.valorTaxaReserva || data.valor_taxa_reserva || '',

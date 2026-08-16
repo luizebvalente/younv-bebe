@@ -240,6 +240,27 @@ export function isLeadConvertido(lead) {
   )
 }
 
+// --- Helper: parte digitada do "Valor Total Orçado" do lead ---
+// O campo valor_orcado passou a ser a SOMA do orçamento digitado no cadastro com o
+// valor das passagens registradas. valor_orcado_base guarda só a parte digitada.
+// Leads gravados antes disso não têm valor_orcado_base: neles valor_orcado ainda é
+// apenas o valor digitado (passagens nunca entravam na conta), então ele serve de
+// base — e a soma vira idempotente a partir da primeira regravação.
+export function getOrcamentoBase(lead) {
+  const base = lead?.valor_orcado_base
+  if (base !== undefined && base !== null && base !== '') return parseFloat(base) || 0
+  return parseFloat(lead?.valor_orcado) || 0
+}
+
+// --- Helper: "Valor Total Orçado" a exibir (cadastro + passagens) ---
+// Idempotente: antes da regravação a base vem de valor_orcado, depois vem de
+// valor_orcado_base — nos dois casos o retorno é base + passagens, nunca o dobro.
+// Serve para os leads que já tinham passagens antes desta conta existir: eles
+// aparecem certos na hora, sem depender de alguém abrir e salvar cada um.
+export function getValorOrcadoTotal(lead) {
+  return getOrcamentoBase(lead) + (parseFloat(lead?.valor_total_visitas) || 0)
+}
+
 // --- Helper: parse de data "YYYY-MM-DD" como data LOCAL ---
 // new Date('2026-07-14') interpreta como UTC → em UTC-3 vira 13/07 21:00 e
 // filtros/exibições deslizam 1 dia. Use SEMPRE este helper para date-only.

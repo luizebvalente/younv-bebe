@@ -15,8 +15,11 @@ import firebaseDataService from '@/services/firebaseDataService'
 import FunilKanban from '@/components/pages/FunilKanban'
 import HistoricoConsumoPaciente from '@/components/pages/HistoricoConsumoPaciente'
 import HistoricoVisitas from '@/components/pages/HistoricoVisitas'
-import { LEAD_STATUSES, CANAIS_CONTATO, DISC_PROFILES, STATUS_COLORS, TAG_CATEGORIES, isLeadConvertido, parseLocalDate } from '@/constants/crm'
+import { LEAD_STATUSES, CANAIS_CONTATO, DISC_PROFILES, STATUS_COLORS, TAG_CATEGORIES, getOrcamentoBase, getValorOrcadoTotal, isLeadConvertido, parseLocalDate } from '@/constants/crm'
 
+
+const formatarBRL = (valor) =>
+  new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(valor) || 0)
 
 // FUNÇÃO UTILITÁRIA PARA DEBOUNCE
 function debounce(func, wait) {
@@ -254,7 +257,7 @@ export default function Leads() {
     agendados: filteredLeads.filter(lead => lead.status === 'Agendado').length,
     convertidos: filteredLeads.filter(isLeadConvertido).length,
     valorTotal: filteredLeads.filter(isLeadConvertido)
-      .reduce((sum, lead) => sum + (Number(lead.valor_orcado) || 0), 0)
+      .reduce((sum, lead) => sum + getValorOrcadoTotal(lead), 0)
   }), [filteredLeads])
 
   const uniqueCreators = useMemo(() => {
@@ -423,6 +426,9 @@ export default function Leads() {
       setSaving(true)
       setError(null)
 
+      const orcamentoBase = parseFloat(formData.valor_orcado) || 0
+      const valorPassagens = parseFloat(editingItem?.valor_total_visitas) || 0
+
       const dataToSave = {
         nome_paciente: formData.nome_paciente || '',
         telefone: formData.telefone || '',
@@ -443,7 +449,11 @@ export default function Leads() {
         outros_profissionais: formData.outros_profissionais || [],
         pagou_reserva: formData.pagou_reserva || false,
         tipo_visita: formData.tipo_visita || '',
-        valor_orcado: parseFloat(formData.valor_orcado) || 0,
+        // O campo do formulário é a BASE do orçamento; valor_orcado (usado por
+        // dashboard, funil e relatórios) é essa base + o valor das passagens.
+        // Sem somar aqui, salvar o cadastro apagaria as passagens do total.
+        valor_orcado_base: orcamentoBase,
+        valor_orcado: orcamentoBase + valorPassagens,
         orcamento_fechado: formData.orcamento_fechado || '',
         valor_fechado_parcial: formData.orcamento_fechado === 'Parcial' ? parseFloat(formData.valor_fechado_parcial) || 0 : 0,
         observacao_geral: formData.observacao_geral || '',
@@ -564,7 +574,9 @@ export default function Leads() {
       ],
       pagou_reserva: item.pagou_reserva || false,
       tipo_visita: item.tipo_visita || '',
-      valor_orcado: item.valor_orcado ? item.valor_orcado.toString() : '',
+      // Base, não o total: o campo edita só o orçamento do cadastro. Carregar o
+      // total aqui somaria as passagens de novo a cada vez que o lead fosse salvo.
+      valor_orcado: getOrcamentoBase(item) ? String(getOrcamentoBase(item)) : '',
       orcamento_fechado: item.orcamento_fechado || '',
       valor_fechado_parcial: item.valor_fechado_parcial ? item.valor_fechado_parcial.toString() : '',
       observacao_geral: item.observacao_geral || '',
@@ -755,7 +767,7 @@ export default function Leads() {
           cell(getMedicoNome(lead.medico_agendado_id)),
           cell(getEspecialidadeNome(lead.especialidade_id)),
           cell(outrosProfissionais),
-          cell(lead.valor_orcado || 0),
+          cell(getValorOrcadoTotal(lead)),
           cell(lead.status),
           cell(lead.tipo_visita),
           cell(formatDate(lead.data_registro_contato)),
@@ -1827,6 +1839,17 @@ export default function Leads() {
                               placeholder="0,00"
                               className="h-10"
                             />
+                            {/* O total inclui as passagens; o campo edita só a parte do
+                                cadastro. Sem mostrar a conta, o valor exibido na lista
+                                pareceria diferente do que foi digitado aqui. */}
+                            {(parseFloat(editingItem?.valor_total_visitas) || 0) > 0 && (
+                              <p className="text-xs text-gray-500">
+                                + {formatarBRL(editingItem.valor_total_visitas)} em passagens
+                                {' '}= <span className="font-semibold text-gray-700">
+                                  {formatarBRL((parseFloat(formData.valor_orcado) || 0) + parseFloat(editingItem.valor_total_visitas))}
+                                </span> no total
+                              </p>
+                            )}
                           </div>
                           <div className="space-y-2">
                             <label className="text-sm font-medium">Status do Orçamento</label>
@@ -2553,8 +2576,13 @@ export default function Leads() {
                           </td>
                           <td className="p-4">
                             <span className="font-medium">
-                              R$ {(lead.valor_orcado || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                              {formatarBRL(getValorOrcadoTotal(lead))}
                             </span>
+                            {(parseFloat(lead.valor_total_visitas) || 0) > 0 && (
+                              <span className="block text-xs text-gray-500">
+                                inclui {formatarBRL(lead.valor_total_visitas)} de passagens
+                              </span>
+                            )}
                           </td>
 
                           <td className="p-4">

@@ -44,6 +44,7 @@ import {
   LEAD_STATUSES,
   STATUS_COLORS,
   STATUS_VISITA_COLORS,
+  getOrcamentoBase,
   parseLocalDate
 } from '@/constants/crm'
 
@@ -301,6 +302,12 @@ export default function HistoricoVisitas({ pacienteId, paciente, onUpdate, trigg
       const totalGastoProdutos = pacienteAtual?.total_gasto_produtos || 0
       const valorTotalGasto = valorTotalVisitas + totalGastoProdutos
 
+      // O valor das passagens não entrava no "Valor Total Orçado" do cadastro do lead:
+      // registrar uma passagem de R$ 500 deixava o orçado como estava. Agora o orçado é
+      // a soma da base digitada com o total das passagens, recalculada a cada gravação
+      // (recalcular, e não acumular, é o que mantém a conta certa ao editar/excluir).
+      const orcamentoBase = getOrcamentoBase(pacienteAtual)
+
       // Atualizar o lead com o novo histórico e estatísticas
       await firebaseDataService.update('leads', pacienteId, {
         historico_visitas: novoHistorico,
@@ -311,6 +318,8 @@ export default function HistoricoVisitas({ pacienteId, paciente, onUpdate, trigg
         media_dias_entre_visitas: mediaDiasEntreVisitas,
         // Total gasto consolidado (visitas + produtos)
         valor_total_gasto: valorTotalGasto,
+        valor_orcado_base: orcamentoBase,
+        valor_orcado: orcamentoBase + valorTotalVisitas,
         // Atualizar tipo de visita automaticamente se for mais de uma visita
         tipo_visita: totalVisitas > 1 ? 'Recorrente' : 'Primeira Visita',
         visitas_por_especialidade: visitasPorEspecialidade
@@ -390,6 +399,9 @@ export default function HistoricoVisitas({ pacienteId, paciente, onUpdate, trigg
       const totalGastoProdutosDel = pacienteAtualDel?.total_gasto_produtos || 0
       const valorTotalGastoDel = valorTotalVisitas + totalGastoProdutosDel
 
+      // Excluir passagem também tira o valor dela do orçado (mesma conta do save)
+      const orcamentoBaseDel = getOrcamentoBase(pacienteAtualDel)
+
       await firebaseDataService.update('leads', pacienteId, {
         historico_visitas: novoHistorico,
         total_visitas: totalVisitas,
@@ -398,6 +410,8 @@ export default function HistoricoVisitas({ pacienteId, paciente, onUpdate, trigg
         valor_total_visitas: valorTotalVisitas,
         media_dias_entre_visitas: mediaDiasEntreVisitas,
         valor_total_gasto: valorTotalGastoDel,
+        valor_orcado_base: orcamentoBaseDel,
+        valor_orcado: orcamentoBaseDel + valorTotalVisitas,
         tipo_visita: totalVisitas > 1 ? 'Recorrente' : totalVisitas === 1 ? 'Primeira Visita' : '',
         visitas_por_especialidade: visitasPorEspecialidadeDel
       })
