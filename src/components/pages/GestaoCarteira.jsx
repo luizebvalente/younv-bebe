@@ -12,7 +12,11 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { useAuth } from '@/contexts/AuthContext'
 import firebaseDataService from '@/services/firebaseDataService'
 import HistoricoVisitas from '@/components/pages/HistoricoVisitas'
-import { LEAD_STATUSES, STATUS_COLORS, parseLocalDate } from '@/constants/crm'
+import { LEAD_STATUSES, STATUS_COLORS, getOrcamentoBase, getValorOrcadoTotal, parseLocalDate } from '@/constants/crm'
+
+// Busca sem acento: digitar "jose" precisa achar "José"
+const semAcento = (texto) =>
+  (texto || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
 
 export default function GestaoCarteira() {
   const { user } = useAuth()
@@ -33,6 +37,7 @@ export default function GestaoCarteira() {
   const [successMessage, setSuccessMessage] = useState('')
 
   // Filter states
+  const [buscaPaciente, setBuscaPaciente] = useState('')
   const [filtroStatus, setFiltroStatus] = useState([])
   const [filtroTags, setFiltroTags] = useState([])
   const [filtroTipoVisita, setFiltroTipoVisita] = useState('')
@@ -264,7 +269,19 @@ export default function GestaoCarteira() {
 
   // Filtered leads based on criteria
   const filteredLeads = useMemo(() => {
+    // Busca por nome ou telefone: sem ela era preciso varrer a listagem inteira
+    // para achar um paciente e marcá-lo
+    const termoBusca = semAcento(buscaPaciente.trim())
+    const digitosBusca = buscaPaciente.replace(/\D/g, '')
+
     return uniqueLeads.filter(lead => {
+      if (termoBusca) {
+        const nomeCasa = semAcento(lead.nome_paciente).includes(termoBusca)
+        const telefoneCasa = digitosBusca.length >= 3 &&
+          (lead.telefone || '').replace(/\D/g, '').includes(digitosBusca)
+        if (!nomeCasa && !telefoneCasa) return false
+      }
+
       if (filtroStatus.length > 0 && !filtroStatus.includes(lead.status)) return false
 
       if (filtroTags.length > 0) {
@@ -318,7 +335,9 @@ export default function GestaoCarteira() {
       if (filtroValorMinGasto) {
         const min = parseFloat(filtroValorMinGasto)
         if (!isNaN(min)) {
-          const totalGasto = (parseFloat(lead.valor_total_gasto) || 0) + (parseFloat(lead.total_gasto_produtos) || 0) + (lead.status === 'Convertido' ? (parseFloat(lead.valor_orcado) || 0) : 0)
+          // getOrcamentoBase e não valor_orcado: o orçado agora já inclui as passagens,
+          // que valor_total_gasto também conta — somar o total contaria duas vezes
+          const totalGasto = (parseFloat(lead.valor_total_gasto) || 0) + (parseFloat(lead.total_gasto_produtos) || 0) + (lead.status === 'Convertido' ? getOrcamentoBase(lead) : 0)
           if (totalGasto < min) return false
         }
       }
@@ -347,9 +366,19 @@ export default function GestaoCarteira() {
 
       return true
     })
-  }, [uniqueLeads, filtroStatus, filtroTags, filtroTipoVisita, filtroUltimaPassagem, filtroAtivoInativo, filtroMedico, filtroDiasSemVisita, filtroMinVisitas, filtroMaxVisitas, filtroValorMinGasto, filtroFollowupPendente, filtroSemRetorno])
+  }, [uniqueLeads, buscaPaciente, filtroStatus, filtroTags, filtroTipoVisita, filtroUltimaPassagem, filtroAtivoInativo, filtroMedico, filtroDiasSemVisita, filtroMinVisitas, filtroMaxVisitas, filtroValorMinGasto, filtroFollowupPendente, filtroSemRetorno])
 
-  const hasActiveFilters = filtroStatus.length > 0 || filtroTags.length > 0 || filtroTipoVisita || filtroUltimaPassagem || filtroAtivoInativo || filtroMedico || filtroDiasSemVisita || filtroMinVisitas || filtroMaxVisitas || filtroValorMinGasto || filtroFollowupPendente || filtroSemRetorno
+  const hasActiveFilters = buscaPaciente.trim() || filtroStatus.length > 0 || filtroTags.length > 0 || filtroTipoVisita || filtroUltimaPassagem || filtroAtivoInativo || filtroMedico || filtroDiasSemVisita || filtroMinVisitas || filtroMaxVisitas || filtroValorMinGasto || filtroFollowupPendente || filtroSemRetorno
+
+  // Pacientes já escolhidos, mesmo os que a busca atual esconde — é o que permite
+  // ir montando a carteira nome por nome sem perder de vista quem já entrou
+  const pacientesSelecionados = useMemo(
+    () => selectedLeads.map(id => uniqueLeads.find(l => l.id === id)).filter(Boolean),
+    [selectedLeads, uniqueLeads]
+  )
+
+  const todosFiltradosSelecionados = filteredLeads.length > 0 &&
+    filteredLeads.every(l => selectedLeads.includes(l.id))
 
   const toggleLeadSelection = (leadId) => {
     setSelectedLeads(prev =>
@@ -357,15 +386,19 @@ export default function GestaoCarteira() {
     )
   }
 
+  // Age só sobre os pacientes visíveis: com uma busca ativa, limpar a seleção
+  // inteira descartaria quem foi marcado nas buscas anteriores
   const selectAll = () => {
-    if (selectedLeads.length === filteredLeads.length) {
-      setSelectedLeads([])
-    } else {
-      setSelectedLeads(filteredLeads.map(l => l.id))
-    }
+    const idsVisiveis = filteredLeads.map(l => l.id)
+    setSelectedLeads(prev =>
+      todosFiltradosSelecionados
+        ? prev.filter(id => !idsVisiveis.includes(id))
+        : Array.from(new Set([...prev, ...idsVisiveis]))
+    )
   }
 
   const clearFilters = () => {
+    setBuscaPaciente('')
     setFiltroStatus([])
     setFiltroTags([])
     setFiltroTipoVisita('')
@@ -378,7 +411,8 @@ export default function GestaoCarteira() {
     setFiltroValorMinGasto('')
     setFiltroFollowupPendente('')
     setFiltroSemRetorno(false)
-    setSelectedLeads([])
+    // Não limpa a seleção: quem já foi marcado numa busca anterior continua na
+    // carteira em montagem. Quem salva a carteira zera a seleção explicitamente.
   }
 
   // Helper: calcular dias sem atividade de um lead
@@ -628,6 +662,30 @@ export default function GestaoCarteira() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
+              {/* Busca direta pelo paciente */}
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">Buscar Paciente</Label>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                  <Input
+                    value={buscaPaciente}
+                    onChange={(e) => setBuscaPaciente(e.target.value)}
+                    placeholder="Digite o nome ou telefone do paciente..."
+                    className="h-10 pl-9"
+                  />
+                  {buscaPaciente && (
+                    <button
+                      type="button"
+                      onClick={() => setBuscaPaciente('')}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-lg leading-none"
+                      title="Limpar busca"
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+              </div>
+
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {/* Status */}
                 <div className="space-y-2">
@@ -811,6 +869,21 @@ export default function GestaoCarteira() {
             </CardContent>
           </Card>
 
+          {/* Nenhum resultado: sem este aviso a tela ficava só com os filtros,
+              parecendo que a busca tinha quebrado */}
+          {filteredLeads.length === 0 && (
+            <Card className="border-0 shadow-lg">
+              <CardContent className="text-center py-10">
+                <Search className="h-10 w-10 mx-auto text-gray-300 mb-3" />
+                <p className="text-gray-500">
+                  {buscaPaciente.trim()
+                    ? `Nenhum paciente encontrado para "${buscaPaciente.trim()}".`
+                    : 'Nenhum paciente atende aos filtros selecionados.'}
+                </p>
+              </CardContent>
+            </Card>
+          )}
+
           {/* Results Table */}
           {filteredLeads.length > 0 && (
             <Card className="border-0 shadow-lg">
@@ -820,7 +893,7 @@ export default function GestaoCarteira() {
                     Pacientes ({filteredLeads.length})
                   </CardTitle>
                   <Button variant="outline" size="sm" onClick={selectAll}>
-                    {selectedLeads.length === filteredLeads.length ? (
+                    {todosFiltradosSelecionados ? (
                       <><CheckSquare className="h-4 w-4 mr-1" /> Desmarcar Todos</>
                     ) : (
                       <><Square className="h-4 w-4 mr-1" /> Selecionar Todos</>
@@ -888,41 +961,77 @@ export default function GestaoCarteira() {
                               <span className="text-gray-400">-</span>
                             )}
                           </td>
-                          <td className="p-3 text-right font-medium">{formatCurrency(lead.valor_orcado)}</td>
+                          <td className="p-3 text-right font-medium">{formatCurrency(getValorOrcadoTotal(lead))}</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
 
-                {/* Save Section */}
-                <div className="mt-6 p-4 bg-gray-50 rounded-lg">
-                  <div className="flex flex-col sm:flex-row items-end gap-4">
-                    <div className="flex-1 w-full">
-                      <Label className="text-sm font-medium mb-2 block">Nome da Carteira</Label>
-                      <Input
-                        value={nomeCarteira}
-                        onChange={(e) => setNomeCarteira(e.target.value)}
-                        placeholder="Ex: Pacientes inativos há 90 dias"
-                        className="h-10"
-                      />
-                    </div>
-                    <Button
-                      onClick={handleSaveCarteira}
-                      disabled={saving || selectedLeads.length === 0 || !nomeCarteira.trim()}
-                      className="bg-purple-600 hover:bg-purple-700"
-                    >
-                      {saving ? (
-                        <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Salvando...</>
-                      ) : (
-                        <><Save className="h-4 w-4 mr-2" /> Salvar Carteira ({selectedLeads.length} pacientes)</>
-                      )}
-                    </Button>
-                  </div>
-                </div>
               </CardContent>
             </Card>
           )}
+
+          {/* Seleção + salvamento ficam FORA da tabela: presos a ela, sumiam da tela
+              junto com os resultados quando a busca não encontrava ninguém, levando
+              embora o nome digitado e a visão de quem já estava selecionado */}
+          <Card className="border-0 shadow-lg">
+            <CardHeader>
+              <CardTitle className="text-lg font-semibold">
+                Carteira em montagem ({selectedLeads.length})
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {pacientesSelecionados.length === 0 ? (
+                <p className="text-sm text-gray-500">
+                  Nenhum paciente selecionado. Use a busca acima para encontrar cada
+                  paciente e marque o checkbox para adicioná-lo.
+                </p>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {pacientesSelecionados.map(p => (
+                    <span
+                      key={p.id}
+                      className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs bg-purple-100 text-purple-800"
+                    >
+                      {p.nome_paciente || '(sem nome)'}
+                      <button
+                        type="button"
+                        onClick={() => toggleLeadSelection(p.id)}
+                        className="ml-1 hover:opacity-70"
+                        title="Remover da carteira"
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              <div className="flex flex-col sm:flex-row items-end gap-4 pt-2 border-t">
+                <div className="flex-1 w-full">
+                  <Label className="text-sm font-medium mb-2 block">Nome da Carteira</Label>
+                  <Input
+                    value={nomeCarteira}
+                    onChange={(e) => setNomeCarteira(e.target.value)}
+                    placeholder="Ex: Pacientes inativos há 90 dias"
+                    className="h-10"
+                  />
+                </div>
+                <Button
+                  onClick={handleSaveCarteira}
+                  disabled={saving || selectedLeads.length === 0 || !nomeCarteira.trim()}
+                  className="bg-purple-600 hover:bg-purple-700"
+                >
+                  {saving ? (
+                    <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Salvando...</>
+                  ) : (
+                    <><Save className="h-4 w-4 mr-2" /> Salvar Carteira ({selectedLeads.length} pacientes)</>
+                  )}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
         </div>
       )}
 
@@ -1064,7 +1173,7 @@ export default function GestaoCarteira() {
                                     <td className="p-3 text-gray-600">
                                       {lead.total_visitas || 0} {lead.total_visitas === 1 ? 'visita' : 'visitas'}
                                     </td>
-                                    <td className="p-3 text-right font-medium">{formatCurrency(lead.valor_orcado)}</td>
+                                    <td className="p-3 text-right font-medium">{formatCurrency(getValorOrcadoTotal(lead))}</td>
                                     <td className="p-3 text-center">
                                       <div className="flex items-center justify-center gap-1">
                                         <Button
