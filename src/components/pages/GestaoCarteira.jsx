@@ -12,11 +12,35 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { useAuth } from '@/contexts/AuthContext'
 import firebaseDataService from '@/services/firebaseDataService'
 import HistoricoVisitas from '@/components/pages/HistoricoVisitas'
-import { LEAD_STATUSES, STATUS_COLORS, getOrcamentoBase, getValorOrcadoTotal, parseLocalDate } from '@/constants/crm'
+import { LEAD_STATUSES, STATUS_COLORS, STATUS_VISITA_COLORS, getOrcamentoBase, getValorOrcadoTotal, parseLocalDate } from '@/constants/crm'
 
 // Busca sem acento: digitar "jose" precisa achar "José"
 const semAcento = (texto) =>
   (texto || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+
+// Passagens registradas DEPOIS da criação da carteira: só elas medem o resultado
+// da campanha de reativação — visitas anteriores não foram fruto dela.
+// data_visita é 'YYYY-MM-DD'; comparar como string ISO evita deslize de fuso.
+const getPassagensPosCarteira = (lead, dataCriacao) => {
+  const corte = String(dataCriacao || '').slice(0, 10)
+  if (!corte) return []
+  return (lead.historico_visitas || []).filter(
+    v => String(v.data_visita || '').slice(0, 10) >= corte
+  )
+}
+
+const isPassagemConvertida = (visita) =>
+  visita?.status === 'Convertido' || visita?.status === 'Convertido Parcial'
+
+// Passagem a destacar na tabela: uma convertida vence a mais recente, porque a
+// pergunta da carteira é "quem converteu?" — não "qual foi a última interação?"
+const getPassagemDestaque = (passagens) => {
+  if (passagens.length === 0) return null
+  return (
+    passagens.find(isPassagemConvertida) ||
+    [...passagens].sort((a, b) => String(b.data_visita || '').localeCompare(String(a.data_visita || '')))[0]
+  )
+}
 
 export default function GestaoCarteira() {
   const { user } = useAuth()
@@ -60,6 +84,8 @@ export default function GestaoCarteira() {
   // Carteira detail
   const [expandedCarteira, setExpandedCarteira] = useState(null)
   const [carteiraLeads, setCarteiraLeads] = useState([])
+  // 'todos' | 'converteu' | 'passou' (retornou sem converter) | 'sem' (não retornou)
+  const [filtroPassagemCarteira, setFiltroPassagemCarteira] = useState('todos')
   const [loadingCarteira, setLoadingCarteira] = useState(false)
   const [updatingPerformance, setUpdatingPerformance] = useState(false)
 
@@ -488,6 +514,7 @@ export default function GestaoCarteira() {
     try {
       setLoadingCarteira(true)
       setExpandedCarteira(carteira.id)
+      setFiltroPassagemCarteira('todos')
 
       const allLeads = await firebaseDataService.getAll('leads')
       const leadsCarteira = allLeads.filter(l => carteira.lista_pacientes.includes(l.id))
@@ -500,6 +527,44 @@ export default function GestaoCarteira() {
     }
   }
 
+  // Resumo de conversão das passagens da carteira aberta, calculado ao vivo dos
+  // leads carregados — não depende do clique em "Atualizar Performance"
+  const carteiraAberta = carteiras.find(c => c.id === expandedCarteira) || null
+
+  const resumoPassagens = useMemo(() => {
+    const vazio = { pacientesConvertidos: 0, pacientesEmAberto: 0, semRetorno: 0, totalPassagens: 0, valorConvertidas: 0 }
+    if (!carteiraAberta) return vazio
+    const resumo = { ...vazio }
+    carteiraLeads.forEach(lead => {
+      const passagens = getPassagensPosCarteira(lead, carteiraAberta.data_criacao)
+      if (passagens.length === 0) {
+        resumo.semRetorno++
+        return
+      }
+      resumo.totalPassagens += passagens.length
+      if (passagens.some(isPassagemConvertida)) {
+        resumo.pacientesConvertidos++
+        resumo.valorConvertidas += passagens
+          .filter(isPassagemConvertida)
+          .reduce((soma, v) => soma + (parseFloat(v.valor) || 0), 0)
+      } else {
+        resumo.pacientesEmAberto++
+      }
+    })
+    return resumo
+  }, [carteiraLeads, carteiraAberta])
+
+  const carteiraLeadsExibidos = useMemo(() => {
+    if (!carteiraAberta || filtroPassagemCarteira === 'todos') return carteiraLeads
+    return carteiraLeads.filter(lead => {
+      const passagens = getPassagensPosCarteira(lead, carteiraAberta.data_criacao)
+      if (filtroPassagemCarteira === 'converteu') return passagens.some(isPassagemConvertida)
+      if (filtroPassagemCarteira === 'passou') return passagens.length > 0 && !passagens.some(isPassagemConvertida)
+      if (filtroPassagemCarteira === 'sem') return passagens.length === 0
+      return true
+    })
+  }, [carteiraLeads, carteiraAberta, filtroPassagemCarteira])
+
   const handleUpdatePerformance = async (carteira) => {
     try {
       setUpdatingPerformance(true)
@@ -510,6 +575,9 @@ export default function GestaoCarteira() {
       const dataCriacao = new Date(carteira.data_criacao)
 
       const reativados = leadsCarteira.filter(l => {
+        // Passagem registrada depois da criação É reativação — o paciente voltou,
+        // independente do campo status do lead ter sido atualizado
+        if (getPassagensPosCarteira(l, carteira.data_criacao).length > 0) return true
         if (l.status !== 'Agendado' && l.status !== 'Convertido') return false
         const dataAlteracao = l.data_ultima_alteracao ? new Date(l.data_ultima_alteracao) : null
         return dataAlteracao && dataAlteracao > dataCriacao
@@ -1093,7 +1161,7 @@ export default function GestaoCarteira() {
                     {expandedCarteira === carteira.id && (
                       <div className="border-t p-4 space-y-4">
                         {/* Performance Cards */}
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                           <div className="bg-blue-50 p-4 rounded-lg">
                             <p className="text-sm text-blue-600 font-medium">Taxa de Reativação</p>
                             <p className="text-2xl font-bold text-blue-900">
@@ -1109,6 +1177,20 @@ export default function GestaoCarteira() {
                           <div className="bg-emerald-50 p-4 rounded-lg">
                             <p className="text-sm text-emerald-600 font-medium">Receita Gerada</p>
                             <p className="text-2xl font-bold text-emerald-900">{formatCurrency(carteira.performance?.receitaGerada || 0)}</p>
+                          </div>
+                          {/* Ao vivo (não depende de "Atualizar Performance"): quem
+                              retornou após a criação da carteira converteu a passagem? */}
+                          <div className="bg-purple-50 p-4 rounded-lg">
+                            <p className="text-sm text-purple-600 font-medium">Conversão de Passagens</p>
+                            <p className="text-2xl font-bold text-purple-900">
+                              {resumoPassagens.pacientesConvertidos}
+                              <span className="text-sm font-medium text-purple-600">
+                                {' '}de {resumoPassagens.pacientesConvertidos + resumoPassagens.pacientesEmAberto} que retornaram
+                              </span>
+                            </p>
+                            <p className="text-xs text-purple-500 mt-1">
+                              {formatCurrency(resumoPassagens.valorConvertidas)} em passagens convertidas
+                            </p>
                           </div>
                         </div>
 
@@ -1142,7 +1224,30 @@ export default function GestaoCarteira() {
                             <span className="ml-2 text-gray-500">Carregando pacientes...</span>
                           </div>
                         ) : (
-                          <div className="overflow-x-auto">
+                          <div className="space-y-3">
+                            {/* Quem converteu / retornou sem converter / não voltou */}
+                            <div className="flex flex-wrap gap-2">
+                              {[
+                                { valor: 'todos', rotulo: `Todos (${carteiraLeads.length})` },
+                                { valor: 'converteu', rotulo: `Converteram (${resumoPassagens.pacientesConvertidos})` },
+                                { valor: 'passou', rotulo: `Retornaram sem converter (${resumoPassagens.pacientesEmAberto})` },
+                                { valor: 'sem', rotulo: `Não retornaram (${resumoPassagens.semRetorno})` },
+                              ].map(opcao => (
+                                <button
+                                  key={opcao.valor}
+                                  onClick={() => setFiltroPassagemCarteira(opcao.valor)}
+                                  className={`px-3 py-1 text-xs rounded-full border transition-colors ${
+                                    filtroPassagemCarteira === opcao.valor
+                                      ? 'bg-purple-600 text-white border-purple-600'
+                                      : 'bg-white text-gray-600 border-gray-300 hover:border-purple-400'
+                                  }`}
+                                >
+                                  {opcao.rotulo}
+                                </button>
+                              ))}
+                            </div>
+
+                            <div className="overflow-x-auto">
                             <table className="w-full text-sm">
                               <thead>
                                 <tr className="border-b bg-gray-50">
@@ -1150,12 +1255,13 @@ export default function GestaoCarteira() {
                                   <th className="p-3 text-left">Telefone</th>
                                   <th className="p-3 text-left">Status Atual</th>
                                   <th className="p-3 text-left">Visitas</th>
+                                  <th className="p-3 text-left">Passagem pós-carteira</th>
                                   <th className="p-3 text-right">Valor Orçado</th>
                                   <th className="p-3 text-center">Ações</th>
                                 </tr>
                               </thead>
                               <tbody>
-                                {carteiraLeads.map(lead => (
+                                {carteiraLeadsExibidos.map(lead => (
                                   <tr key={lead.id} className="border-b hover:bg-purple-50 transition-colors">
                                     <td
                                       className="p-3 font-medium text-purple-700 cursor-pointer hover:underline"
@@ -1172,6 +1278,24 @@ export default function GestaoCarteira() {
                                     </td>
                                     <td className="p-3 text-gray-600">
                                       {lead.total_visitas || 0} {lead.total_visitas === 1 ? 'visita' : 'visitas'}
+                                    </td>
+                                    <td className="p-3">
+                                      {(() => {
+                                        const passagens = getPassagensPosCarteira(lead, carteira.data_criacao)
+                                        const destaque = getPassagemDestaque(passagens)
+                                        if (!destaque) return <span className="text-gray-400 text-xs">não retornou</span>
+                                        return (
+                                          <div className="flex items-center gap-2">
+                                            <Badge className={`text-xs ${STATUS_COLORS[destaque.status] || STATUS_VISITA_COLORS[destaque.status] || 'bg-gray-100 text-gray-800'}`}>
+                                              {destaque.status || '—'}
+                                            </Badge>
+                                            <span className="text-xs text-gray-500 whitespace-nowrap">
+                                              {destaque.data_visita ? parseLocalDate(destaque.data_visita).toLocaleDateString('pt-BR') : ''}
+                                              {passagens.length > 1 && ` (+${passagens.length - 1})`}
+                                            </span>
+                                          </div>
+                                        )
+                                      })()}
                                     </td>
                                     <td className="p-3 text-right font-medium">{formatCurrency(getValorOrcadoTotal(lead))}</td>
                                     <td className="p-3 text-center">
@@ -1215,6 +1339,7 @@ export default function GestaoCarteira() {
                                 ))}
                               </tbody>
                             </table>
+                            </div>
                           </div>
                         )}
 
