@@ -60,6 +60,7 @@ import { Flame, AlertCircle, AlertTriangle, PhoneOff, Snowflake, ArrowUp, Coins,
 import html2canvas from 'html2canvas'
 import * as XLSX from 'xlsx'
 import firebaseDataService from '@/services/firebaseDataService'
+import { STATUS_COLORS, STATUS_VISITA_COLORS, parseLocalDate } from '@/constants/crm'
 
 const COLORS = ['#8b5cf6', '#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#06b6d4', '#ec4899']
 
@@ -122,26 +123,46 @@ export default function RelatorioRecorrentes() {
         ? (lead.data_consulta_efetiva || lead.data_registro_contato)
         : lead.data_registro_contato
 
+    // data_visita é 'YYYY-MM-DD': comparar como string ISO evita qualquer
+    // deslocamento de fuso (new Date('YYYY-MM-DD') é UTC e recuava 1 dia no BRT)
+    const visitaNoPeriodo = (visita) => {
+        const d = String(visita?.data_visita || '').slice(0, 10)
+        if (!d) return false
+        if (periodFilter.startDate && d < periodFilter.startDate) return false
+        if (periodFilter.endDate && d > periodFilter.endDate) return false
+        return true
+    }
+
     // Filtrar leads
     const getFilteredLeads = () => {
         let filtered = leads
 
         // Filtro por período
         if (periodFilter.startDate || periodFilter.endDate) {
-            filtered = filtered.filter(lead => {
-                const dataRegistro = new Date(getDateField(lead))
-                // 'T00:00:00'/'T23:59:59' sem sufixo Z = horário LOCAL — new Date('YYYY-MM-DD')
-                // puro era UTC e deslocava o início do período ~3h para o dia anterior (BRT)
-                if (periodFilter.startDate && periodFilter.endDate) {
-                    return dataRegistro >= new Date(periodFilter.startDate + 'T00:00:00') &&
-                        dataRegistro <= new Date(periodFilter.endDate + 'T23:59:59.999')
-                } else if (periodFilter.startDate) {
-                    return dataRegistro >= new Date(periodFilter.startDate + 'T00:00:00')
-                } else if (periodFilter.endDate) {
-                    return dataRegistro <= new Date(periodFilter.endDate + 'T23:59:59.999')
-                }
-                return true
-            })
+            if (dateFilterType === 'passagem') {
+                // Modo "Data da Passagem": o lead entra se QUALQUER visita do
+                // histórico cair no período. Antes o período só olhava a data de
+                // registro/consulta do lead — um paciente antigo que passou pela
+                // clínica hoje ficava fora do relatório de hoje.
+                filtered = filtered.filter(lead =>
+                    (lead.historico_visitas || []).some(visitaNoPeriodo)
+                )
+            } else {
+                filtered = filtered.filter(lead => {
+                    const dataRegistro = new Date(getDateField(lead))
+                    // 'T00:00:00'/'T23:59:59' sem sufixo Z = horário LOCAL — new Date('YYYY-MM-DD')
+                    // puro era UTC e deslocava o início do período ~3h para o dia anterior (BRT)
+                    if (periodFilter.startDate && periodFilter.endDate) {
+                        return dataRegistro >= new Date(periodFilter.startDate + 'T00:00:00') &&
+                            dataRegistro <= new Date(periodFilter.endDate + 'T23:59:59.999')
+                    } else if (periodFilter.startDate) {
+                        return dataRegistro >= new Date(periodFilter.startDate + 'T00:00:00')
+                    } else if (periodFilter.endDate) {
+                        return dataRegistro <= new Date(periodFilter.endDate + 'T23:59:59.999')
+                    }
+                    return true
+                })
+            }
         }
 
         // Filtro por médicos (múltipla seleção) - considera médico agendado E médicos das visitas
@@ -311,7 +332,34 @@ export default function RelatorioRecorrentes() {
             .filter(lead => lead.total_visitas && lead.total_visitas > 1)
             .sort((a, b) => (b.total_visitas || 0) - (a.total_visitas || 0))
             .slice(0, 10)
-    }, [leads, periodFilter, selectedMedicos])
+    }, [leads, periodFilter, selectedMedicos, dateFilterType])
+
+    // Todas as passagens individuais do período, uma linha por visita.
+    // É o que faltava para "quem passou pela clínica hoje?": o Top 10 acima é um
+    // ranking por contagem — um paciente com poucas visitas nunca entrava nele,
+    // e nenhuma outra lista mostrava as passagens em si.
+    const passagensPeriodo = useMemo(() => {
+        const filteredLeads = getFilteredLeads()
+        const temPeriodo = Boolean(periodFilter.startDate || periodFilter.endDate)
+        const linhas = []
+
+        filteredLeads.forEach(lead => {
+            (lead.historico_visitas || []).forEach(visita => {
+                if (temPeriodo && !visitaNoPeriodo(visita)) return
+                // Com médicos selecionados, mostrar só as passagens desses médicos
+                // (o filtro de lead acima mantém o paciente; aqui filtramos a linha)
+                if (selectedMedicos.length > 0 && !selectedMedicos.includes(visita.medico_id)) return
+                linhas.push({ lead, visita })
+            })
+        })
+
+        linhas.sort((a, b) => String(b.visita.data_visita || '').localeCompare(String(a.visita.data_visita || '')))
+        return {
+            linhas,
+            valorTotal: linhas.reduce((sum, l) => sum + (parseFloat(l.visita.valor) || 0), 0),
+            pacientesUnicos: new Set(linhas.map(l => l.lead.id)).size
+        }
+    }, [leads, periodFilter, selectedMedicos, dateFilterType, selectedEspecialidadeFilter])
 
     // Análise por médico - considera visitas do histórico, não apenas o médico agendado
     const recorrenciaPorMedico = useMemo(() => {
@@ -379,7 +427,7 @@ export default function RelatorioRecorrentes() {
             .filter(stats => stats.visitas > 0 || stats.total > 0)
             .sort((a, b) => b.recorrentes - a.recorrentes)
             .slice(0, 10)
-    }, [leads, medicos, periodFilter, selectedMedicos])
+    }, [leads, medicos, periodFilter, selectedMedicos, dateFilterType, selectedEspecialidadeFilter])
 
     // Análise de retenção - Dias desde última visita
     const analiseRetencao = useMemo(() => {
@@ -411,7 +459,7 @@ export default function RelatorioRecorrentes() {
             categoria,
             quantidade
         }))
-    }, [leads, periodFilter, selectedMedicos])
+    }, [leads, periodFilter, selectedMedicos, dateFilterType, selectedEspecialidadeFilter])
 
     // Análise de frequência de visitas
     const analiseFrequencia = useMemo(() => {
@@ -439,7 +487,7 @@ export default function RelatorioRecorrentes() {
             quantidade,
             cor: COLORS[Object.keys(categorias).indexOf(categoria) % COLORS.length]
         }))
-    }, [leads, periodFilter, selectedMedicos])
+    }, [leads, periodFilter, selectedMedicos, dateFilterType, selectedEspecialidadeFilter])
 
     // Pacientes inativos - sem visita há mais de X dias
     const pacientesInativos = useMemo(() => {
@@ -469,7 +517,7 @@ export default function RelatorioRecorrentes() {
         })
 
         return inativos
-    }, [leads, periodFilter, selectedMedicos])
+    }, [leads, periodFilter, selectedMedicos, dateFilterType, selectedEspecialidadeFilter])
 
     // ==========================================
     // CROSSCHECK — DETECÇÃO DE OPORTUNIDADES
@@ -752,7 +800,7 @@ export default function RelatorioRecorrentes() {
                 receitaRecorrentes
             }
         }).filter(m => m.totalLeads > 0).sort((a, b) => b.totalLeads - a.totalLeads)
-    }, [leads, medicos, periodFilter, selectedMedicos])
+    }, [leads, medicos, periodFilter, selectedMedicos, dateFilterType, selectedEspecialidadeFilter])
 
     // Ranking de canais por volume e conversão
     const rankingCanaisPerformance = useMemo(() => {
@@ -776,7 +824,7 @@ export default function RelatorioRecorrentes() {
             taxaConversao: c.totalLeads > 0 ? ((c.convertidos / c.totalLeads) * 100).toFixed(1) : '0.0',
             taxaRecorrencia: c.totalLeads > 0 ? ((c.recorrentes / c.totalLeads) * 100).toFixed(1) : '0.0'
         })).sort((a, b) => b.totalLeads - a.totalLeads)
-    }, [leads, periodFilter, selectedMedicos])
+    }, [leads, periodFilter, selectedMedicos, dateFilterType, selectedEspecialidadeFilter])
 
     // Ranking de especialidades por volume e conversão
     const rankingEspecialidades = useMemo(() => {
@@ -802,7 +850,7 @@ export default function RelatorioRecorrentes() {
                 receita
             }
         }).filter(e => e.totalLeads > 0).sort((a, b) => b.totalLeads - a.totalLeads)
-    }, [leads, especialidades, periodFilter, selectedMedicos])
+    }, [leads, especialidades, periodFilter, selectedMedicos, dateFilterType, selectedEspecialidadeFilter])
 
     // Distribuição para gráfico de pizza
     const pieData = useMemo(() => {
@@ -1071,6 +1119,25 @@ export default function RelatorioRecorrentes() {
             wsTop['!cols'] = [{ wch: 5 }, { wch: 30 }, { wch: 16 }, { wch: 8 }, { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 14 }]
             XLSX.utils.book_append_sheet(wb, wsTop, 'Top Recorrentes')
 
+            // --- Aba: Passagens do Período (sem o corte de 100 linhas da tela) ---
+            const passagensData = [
+                ['Data', 'Paciente', 'Telefone', 'Médico', 'Especialidade', 'Tipo', 'Status', 'Valor', 'Observações'],
+                ...passagensPeriodo.linhas.map(({ lead, visita }) => [
+                    visita.data_visita ? parseLocalDate(visita.data_visita).toLocaleDateString('pt-BR') : 'N/A',
+                    lead.nome_paciente || 'N/A',
+                    lead.telefone || '',
+                    visita.medico_nome || 'N/A',
+                    visita.especialidade_nome || '',
+                    visita.tipo_visita || 'Consulta',
+                    visita.status || '',
+                    parseFloat(visita.valor) || 0,
+                    visita.observacoes || ''
+                ])
+            ]
+            const wsPassagens = XLSX.utils.aoa_to_sheet(passagensData)
+            wsPassagens['!cols'] = [{ wch: 12 }, { wch: 30 }, { wch: 16 }, { wch: 28 }, { wch: 20 }, { wch: 14 }, { wch: 18 }, { wch: 12 }, { wch: 50 }]
+            XLSX.utils.book_append_sheet(wb, wsPassagens, 'Passagens')
+
             // --- Aba 3: Evolução Mensal ---
             const mensalData = [
                 ['Mês', 'Novos', 'Recorrentes', 'Valor Novos', 'Valor Recorrentes'],
@@ -1273,7 +1340,20 @@ export default function RelatorioRecorrentes() {
                                   >
                                     Data da Consulta
                                   </button>
+                                  <button
+                                    onClick={() => setDateFilterType('passagem')}
+                                    className={`px-2 py-1 rounded text-xs ${dateFilterType === 'passagem' ? 'bg-purple-100 text-purple-800 font-medium' : 'text-gray-500'}`}
+                                    title="Inclui o paciente se qualquer passagem dele cair no período"
+                                  >
+                                    Data da Passagem
+                                  </button>
                                 </div>
+                                {dateFilterType === 'passagem' && (
+                                    <p className="text-xs text-purple-600">
+                                        O período olha as datas das passagens registradas: um paciente
+                                        antigo que passou pela clínica no período entra no relatório.
+                                    </p>
+                                )}
                             </div>
                             <div className="space-y-1">
                                 <label className="text-xs text-gray-500">Especialidade</label>
@@ -1748,6 +1828,77 @@ export default function RelatorioRecorrentes() {
                         </CardContent>
                     </Card>
                 )}
+
+            {/* Passagens do período — uma linha por visita. Sem esta lista, a única
+                visão de pacientes era o Top 10 por contagem, e uma passagem
+                registrada hoje não aparecia em lugar nenhum do relatório. */}
+            <Card>
+                <CardHeader>
+                    <CardTitle className="text-lg flex items-center gap-2">
+                        <Activity className="h-5 w-5 text-purple-600" />
+                        Passagens no Período ({passagensPeriodo.linhas.length})
+                    </CardTitle>
+                    <CardDescription>
+                        {(periodFilter.startDate || periodFilter.endDate)
+                            ? `${passagensPeriodo.pacientesUnicos} paciente(s) • ${formatCurrency(passagensPeriodo.valorTotal)} em passagens no período`
+                            : `Todas as passagens registradas (${passagensPeriodo.pacientesUnicos} pacientes) — defina um período acima para ver um dia específico`}
+                    </CardDescription>
+                </CardHeader>
+                <CardContent>
+                    {passagensPeriodo.linhas.length === 0 ? (
+                        <div className="text-center py-8 text-gray-500">
+                            <Activity className="h-12 w-12 mx-auto mb-3 text-gray-300" />
+                            <p>Nenhuma passagem registrada no período</p>
+                        </div>
+                    ) : (
+                        <div className="rounded-md border">
+                            <Table>
+                                <TableHeader>
+                                    <TableRow>
+                                        <TableHead>Data</TableHead>
+                                        <TableHead>Paciente</TableHead>
+                                        <TableHead>Telefone</TableHead>
+                                        <TableHead>Médico</TableHead>
+                                        <TableHead>Tipo</TableHead>
+                                        <TableHead>Status</TableHead>
+                                        <TableHead className="text-right">Valor</TableHead>
+                                    </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                    {passagensPeriodo.linhas.slice(0, 100).map(({ lead, visita }) => (
+                                        <TableRow key={`${lead.id}-${visita.id}`}>
+                                            <TableCell className="text-sm whitespace-nowrap">
+                                                {visita.data_visita ? parseLocalDate(visita.data_visita).toLocaleDateString('pt-BR') : 'N/A'}
+                                            </TableCell>
+                                            <TableCell className="font-medium">{lead.nome_paciente}</TableCell>
+                                            <TableCell className="text-sm">{lead.telefone}</TableCell>
+                                            <TableCell className="text-sm">{visita.medico_nome || 'N/A'}</TableCell>
+                                            <TableCell>
+                                                <Badge variant="outline" className="text-xs">
+                                                    {visita.tipo_visita || 'Consulta'}
+                                                </Badge>
+                                            </TableCell>
+                                            <TableCell>
+                                                <Badge className={STATUS_COLORS[visita.status] || STATUS_VISITA_COLORS[visita.status] || 'bg-gray-100 text-gray-800'}>
+                                                    {visita.status || '—'}
+                                                </Badge>
+                                            </TableCell>
+                                            <TableCell className="text-right text-sm font-medium text-green-600">
+                                                {formatCurrency(visita.valor)}
+                                            </TableCell>
+                                        </TableRow>
+                                    ))}
+                                </TableBody>
+                            </Table>
+                            {passagensPeriodo.linhas.length > 100 && (
+                                <p className="text-xs text-gray-500 text-center py-2">
+                                    Mostrando as 100 passagens mais recentes de {passagensPeriodo.linhas.length} — refine o período para ver as demais
+                                </p>
+                            )}
+                        </div>
+                    )}
+                </CardContent>
+            </Card>
 
             {/* Top Pacientes Recorrentes */}
             <Card>

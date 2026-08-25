@@ -320,8 +320,13 @@ export default function HistoricoVisitas({ pacienteId, paciente, onUpdate, trigg
         valor_total_gasto: valorTotalGasto,
         valor_orcado_base: orcamentoBase,
         valor_orcado: orcamentoBase + valorTotalVisitas,
-        // Atualizar tipo de visita automaticamente se for mais de uma visita
-        tipo_visita: totalVisitas > 1 ? 'Recorrente' : 'Primeira Visita',
+        // 2+ visitas registradas = Recorrente. Com 1 visita, PRESERVAR um
+        // 'Recorrente' existente: o cadastro marca Recorrente quando o paciente
+        // retorna (telefone já conhecido), e forçar 'Primeira Visita' aqui
+        // rebaixava o lead e o sumia do relatório de recorrentes.
+        tipo_visita: totalVisitas > 1 || pacienteAtual?.tipo_visita === 'Recorrente'
+          ? 'Recorrente'
+          : 'Primeira Visita',
         visitas_por_especialidade: visitasPorEspecialidade
       })
 
@@ -412,7 +417,11 @@ export default function HistoricoVisitas({ pacienteId, paciente, onUpdate, trigg
         valor_total_gasto: valorTotalGastoDel,
         valor_orcado_base: orcamentoBaseDel,
         valor_orcado: orcamentoBaseDel + valorTotalVisitas,
-        tipo_visita: totalVisitas > 1 ? 'Recorrente' : totalVisitas === 1 ? 'Primeira Visita' : '',
+        // Mesma regra do save: excluir uma visita não desfaz o fato de o
+        // paciente ter retornado — um Recorrente continua Recorrente
+        tipo_visita: totalVisitas > 1 || pacienteAtualDel?.tipo_visita === 'Recorrente'
+          ? 'Recorrente'
+          : totalVisitas === 1 ? 'Primeira Visita' : '',
         visitas_por_especialidade: visitasPorEspecialidadeDel
       })
 
