@@ -361,6 +361,24 @@ export default function RelatorioRecorrentes() {
         }
     }, [leads, periodFilter, selectedMedicos, dateFilterType, selectedEspecialidadeFilter])
 
+    // Quem (usuário do sistema) está registrando e convertendo as passagens.
+    // registrado_por_nome é o usuário logado que gravou a passagem — a melhor
+    // aproximação de "quem converteu"; o médico da visita é outra coluna.
+    const conversoesPorUsuario = useMemo(() => {
+        const mapa = {}
+        passagensPeriodo.linhas.forEach(({ visita }) => {
+            const nome = visita.registrado_por_nome || 'Não informado'
+            if (!mapa[nome]) mapa[nome] = { nome, passagens: 0, convertidas: 0, valorConvertidas: 0 }
+            mapa[nome].passagens++
+            if (visita.status === 'Convertido' || visita.status === 'Convertido Parcial') {
+                mapa[nome].convertidas++
+                mapa[nome].valorConvertidas += parseFloat(visita.valor) || 0
+            }
+        })
+        return Object.values(mapa)
+            .sort((a, b) => b.convertidas - a.convertidas || b.passagens - a.passagens)
+    }, [passagensPeriodo])
+
     // Análise por médico - considera visitas do histórico, não apenas o médico agendado
     const recorrenciaPorMedico = useMemo(() => {
         const filteredLeads = getFilteredLeads()
@@ -1121,7 +1139,7 @@ export default function RelatorioRecorrentes() {
 
             // --- Aba: Passagens do Período (sem o corte de 100 linhas da tela) ---
             const passagensData = [
-                ['Data', 'Paciente', 'Telefone', 'Médico', 'Especialidade', 'Tipo', 'Status', 'Valor', 'Observações'],
+                ['Data', 'Paciente', 'Telefone', 'Médico', 'Especialidade', 'Tipo', 'Status', 'Registrado por', 'Valor', 'Observações'],
                 ...passagensPeriodo.linhas.map(({ lead, visita }) => [
                     visita.data_visita ? parseLocalDate(visita.data_visita).toLocaleDateString('pt-BR') : 'N/A',
                     lead.nome_paciente || 'N/A',
@@ -1130,13 +1148,29 @@ export default function RelatorioRecorrentes() {
                     visita.especialidade_nome || '',
                     visita.tipo_visita || 'Consulta',
                     visita.status || '',
+                    visita.registrado_por_nome || '',
                     parseFloat(visita.valor) || 0,
                     visita.observacoes || ''
                 ])
             ]
             const wsPassagens = XLSX.utils.aoa_to_sheet(passagensData)
-            wsPassagens['!cols'] = [{ wch: 12 }, { wch: 30 }, { wch: 16 }, { wch: 28 }, { wch: 20 }, { wch: 14 }, { wch: 18 }, { wch: 12 }, { wch: 50 }]
+            wsPassagens['!cols'] = [{ wch: 12 }, { wch: 30 }, { wch: 16 }, { wch: 28 }, { wch: 20 }, { wch: 14 }, { wch: 18 }, { wch: 24 }, { wch: 12 }, { wch: 50 }]
             XLSX.utils.book_append_sheet(wb, wsPassagens, 'Passagens')
+
+            // --- Aba: Conversões por Usuário ---
+            const usuariosData = [
+                ['Usuário', 'Passagens Registradas', 'Convertidas', 'Taxa', 'Valor Convertido'],
+                ...conversoesPorUsuario.map(u => [
+                    u.nome,
+                    u.passagens,
+                    u.convertidas,
+                    `${u.passagens > 0 ? ((u.convertidas / u.passagens) * 100).toFixed(0) : 0}%`,
+                    u.valorConvertidas
+                ])
+            ]
+            const wsUsuarios = XLSX.utils.aoa_to_sheet(usuariosData)
+            wsUsuarios['!cols'] = [{ wch: 30 }, { wch: 20 }, { wch: 14 }, { wch: 10 }, { wch: 18 }]
+            XLSX.utils.book_append_sheet(wb, wsUsuarios, 'Conversões por Usuário')
 
             // --- Aba 3: Evolução Mensal ---
             const mensalData = [
@@ -1861,6 +1895,7 @@ export default function RelatorioRecorrentes() {
                                         <TableHead>Médico</TableHead>
                                         <TableHead>Tipo</TableHead>
                                         <TableHead>Status</TableHead>
+                                        <TableHead>Registrado por</TableHead>
                                         <TableHead className="text-right">Valor</TableHead>
                                     </TableRow>
                                 </TableHeader>
@@ -1883,6 +1918,9 @@ export default function RelatorioRecorrentes() {
                                                     {visita.status || '—'}
                                                 </Badge>
                                             </TableCell>
+                                            <TableCell className="text-sm text-gray-600">
+                                                {visita.registrado_por_nome || '—'}
+                                            </TableCell>
                                             <TableCell className="text-right text-sm font-medium text-green-600">
                                                 {formatCurrency(visita.valor)}
                                             </TableCell>
@@ -1899,6 +1937,56 @@ export default function RelatorioRecorrentes() {
                     )}
                 </CardContent>
             </Card>
+
+            {/* Quem da equipe está convertendo — agrupado pelo usuário que
+                registrou cada passagem do período acima */}
+            {conversoesPorUsuario.length > 0 && (
+                <Card>
+                    <CardHeader>
+                        <CardTitle className="text-lg flex items-center gap-2">
+                            <UserCheck className="h-5 w-5 text-purple-600" />
+                            Conversões por Usuário
+                        </CardTitle>
+                        <CardDescription>
+                            Usuário do sistema que registrou cada passagem do período — o médico da visita está na lista acima
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                        <div className="rounded-md border">
+                            <Table>
+                                <TableHeader>
+                                    <TableRow>
+                                        <TableHead>Usuário</TableHead>
+                                        <TableHead className="text-center">Passagens Registradas</TableHead>
+                                        <TableHead className="text-center">Convertidas</TableHead>
+                                        <TableHead className="text-center">Taxa</TableHead>
+                                        <TableHead className="text-right">Valor Convertido</TableHead>
+                                    </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                    {conversoesPorUsuario.map(u => (
+                                        <TableRow key={u.nome}>
+                                            <TableCell className="font-medium">{u.nome}</TableCell>
+                                            <TableCell className="text-center">{u.passagens}</TableCell>
+                                            <TableCell className="text-center">
+                                                <Badge className={u.convertidas > 0 ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'}>
+                                                    {u.convertidas}
+                                                </Badge>
+                                            </TableCell>
+                                            <TableCell className="text-center text-sm text-gray-600">
+                                                {u.passagens > 0 ? ((u.convertidas / u.passagens) * 100).toFixed(0) : 0}%
+                                            </TableCell>
+                                            <TableCell className="text-right font-medium text-green-600">
+                                                {formatCurrency(u.valorConvertidas)}
+                                            </TableCell>
+                                        </TableRow>
+                                    ))}
+                                </TableBody>
+                            </Table>
+                        </div>
+                    </CardContent>
+                </Card>
+            )}
 
             {/* Top Pacientes Recorrentes */}
             <Card>

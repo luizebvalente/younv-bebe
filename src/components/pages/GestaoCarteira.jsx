@@ -1285,14 +1285,21 @@ export default function GestaoCarteira() {
                                         const destaque = getPassagemDestaque(passagens)
                                         if (!destaque) return <span className="text-gray-400 text-xs">não retornou</span>
                                         return (
-                                          <div className="flex items-center gap-2">
-                                            <Badge className={`text-xs ${STATUS_COLORS[destaque.status] || STATUS_VISITA_COLORS[destaque.status] || 'bg-gray-100 text-gray-800'}`}>
-                                              {destaque.status || '—'}
-                                            </Badge>
-                                            <span className="text-xs text-gray-500 whitespace-nowrap">
-                                              {destaque.data_visita ? parseLocalDate(destaque.data_visita).toLocaleDateString('pt-BR') : ''}
-                                              {passagens.length > 1 && ` (+${passagens.length - 1})`}
-                                            </span>
+                                          <div>
+                                            <div className="flex items-center gap-2">
+                                              <Badge className={`text-xs ${STATUS_COLORS[destaque.status] || STATUS_VISITA_COLORS[destaque.status] || 'bg-gray-100 text-gray-800'}`}>
+                                                {destaque.status || '—'}
+                                              </Badge>
+                                              <span className="text-xs text-gray-500 whitespace-nowrap">
+                                                {destaque.data_visita ? parseLocalDate(destaque.data_visita).toLocaleDateString('pt-BR') : ''}
+                                                {passagens.length > 1 && ` (+${passagens.length - 1})`}
+                                              </span>
+                                            </div>
+                                            {destaque.registrado_por_nome && (
+                                              <span className="text-[11px] text-gray-400">
+                                                por {destaque.registrado_por_nome}
+                                              </span>
+                                            )}
                                           </div>
                                         )
                                       })()}
