@@ -15,11 +15,26 @@ import firebaseDataService from '@/services/firebaseDataService'
 import FunilKanban from '@/components/pages/FunilKanban'
 import HistoricoConsumoPaciente from '@/components/pages/HistoricoConsumoPaciente'
 import HistoricoVisitas from '@/components/pages/HistoricoVisitas'
-import { LEAD_STATUSES, CANAIS_CONTATO, DISC_PROFILES, STATUS_COLORS, TAG_CATEGORIES, getOrcamentoBase, getValorOrcadoTotal, isLeadConvertido, parseLocalDate } from '@/constants/crm'
+import { LEAD_STATUSES, CANAIS_CONTATO, DISC_PROFILES, STATUS_COLORS, STATUS_VISITA, TAG_CATEGORIES, getOrcamentoBase, getValorOrcadoTotal, isLeadConvertido, parseLocalDate } from '@/constants/crm'
 
 
 const formatarBRL = (valor) =>
   new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(valor) || 0)
+
+// Passagem mais recente do lead. O save do histórico grava ordenado por data
+// desc, mas reordena aqui para não depender disso em dados antigos.
+const getUltimaPassagem = (lead) => {
+  const historico = lead.historico_visitas
+  if (!Array.isArray(historico) || historico.length === 0) return null
+  return [...historico].sort((a, b) => new Date(b.data_visita) - new Date(a.data_visita))[0]
+}
+
+// Opções do filtro de status da passagem: lista do lead + valores legados
+// gravados nas visitas antigas ('Realizada' etc.), sem duplicar 'Faltou'
+const STATUS_PASSAGEM_OPCOES = [
+  ...LEAD_STATUSES,
+  ...STATUS_VISITA.filter(s => !LEAD_STATUSES.includes(s))
+]
 
 // FUNÇÃO UTILITÁRIA PARA DEBOUNCE
 function debounce(func, wait) {
@@ -56,6 +71,9 @@ export default function Leads() {
   const [searchTerm, setSearchTerm] = useState('')
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState('Todos')
+  // Filtro pelo status da ÚLTIMA passagem registrada — permite achar quem está
+  // com a passagem em aberto (Agendado, Em Conversa...) ou já Convertido
+  const [passagemFilter, setPassagemFilter] = useState('Todos')
   const [createdByFilter, setCreatedByFilter] = useState('Todos')
   const [alteredByFilter, setAlteredByFilter] = useState('Todos')
   const [selectedTagsFilter, setSelectedTagsFilter] = useState([])
@@ -218,6 +236,16 @@ export default function Leads() {
     return baseLeads.filter(lead => {
       // Curto-circuito: filtros baratos primeiro
       if (statusFilter !== 'Todos' && lead.status !== statusFilter) return false
+      if (passagemFilter !== 'Todos') {
+        const ultima = getUltimaPassagem(lead)
+        if (passagemFilter === 'Com passagem') {
+          if (!ultima) return false
+        } else if (passagemFilter === 'Sem passagem') {
+          if (ultima) return false
+        } else if ((ultima?.status || '') !== passagemFilter) {
+          return false
+        }
+      }
       if (createdByFilter !== 'Todos' && lead.criado_por_nome !== createdByFilter) return false
       if (alteredByFilter !== 'Todos' && lead.alterado_por_nome !== alteredByFilter) return false
       // OR entre tags: lead com QUALQUER uma das tags selecionadas passa
@@ -236,7 +264,7 @@ export default function Leads() {
       }
       return true
     })
-  }, [leads, filteredByDateLeads, showDateFilter, debouncedSearchTerm, statusFilter, createdByFilter, alteredByFilter, selectedTagsFilter])
+  }, [leads, filteredByDateLeads, showDateFilter, debouncedSearchTerm, statusFilter, passagemFilter, createdByFilter, alteredByFilter, selectedTagsFilter])
 
   // Side-effects extraídos do useMemo (evita renders extras)
   useEffect(() => {
@@ -304,7 +332,7 @@ export default function Leads() {
   // Resetar página quando filtros mudarem
   useEffect(() => {
     setCurrentPage(1)
-  }, [debouncedSearchTerm, statusFilter, createdByFilter, alteredByFilter, selectedTagsFilter, showDateFilter, dateFilter])
+  }, [debouncedSearchTerm, statusFilter, passagemFilter, createdByFilter, alteredByFilter, selectedTagsFilter, showDateFilter, dateFilter])
 
   // FUNÇÕES OTIMIZADAS COM useCallback
   const handleFormChange = useCallback((field, value) => {
@@ -2248,6 +2276,23 @@ export default function Leads() {
             </div>
 
             <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-gray-600 px-1">Última Passagem</label>
+              <Select value={passagemFilter} onValueChange={setPassagemFilter}>
+                <SelectTrigger className="w-[190px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Todos">Todas</SelectItem>
+                  <SelectItem value="Com passagem">Com passagem</SelectItem>
+                  <SelectItem value="Sem passagem">Sem passagem</SelectItem>
+                  {STATUS_PASSAGEM_OPCOES.map(s => (
+                    <SelectItem key={s} value={s}>{s}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex flex-col gap-1">
               <label className="text-xs font-medium text-gray-600 px-1">Criado Por</label>
               <Select value={createdByFilter} onValueChange={setCreatedByFilter}>
                 <SelectTrigger className="w-[180px]">
@@ -2340,6 +2385,21 @@ export default function Leads() {
                   size="sm"
                   className="h-5 w-5 p-0 hover:bg-green-200"
                   onClick={() => setStatusFilter('Todos')}
+                >
+                  <X className="h-3 w-3" />
+                </Button>
+              </div>
+            )}
+
+            {passagemFilter !== 'Todos' && (
+              <div className="flex items-center gap-2 text-sm text-indigo-600 bg-indigo-50 px-3 py-1 rounded-lg border border-indigo-200">
+                <History className="h-4 w-4" />
+                <span>Última passagem: {passagemFilter}</span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-5 w-5 p-0 hover:bg-indigo-200"
+                  onClick={() => setPassagemFilter('Todos')}
                 >
                   <X className="h-3 w-3" />
                 </Button>
