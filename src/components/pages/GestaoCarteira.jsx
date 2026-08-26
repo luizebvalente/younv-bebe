@@ -86,6 +86,8 @@ export default function GestaoCarteira() {
   const [carteiraLeads, setCarteiraLeads] = useState([])
   // 'todos' | 'converteu' | 'passou' (retornou sem converter) | 'sem' (não retornou)
   const [filtroPassagemCarteira, setFiltroPassagemCarteira] = useState('todos')
+  // Usuário que registrou a passagem pós-carteira ('todos' = sem filtro)
+  const [filtroUsuarioCarteira, setFiltroUsuarioCarteira] = useState('todos')
   const [loadingCarteira, setLoadingCarteira] = useState(false)
   const [updatingPerformance, setUpdatingPerformance] = useState(false)
 
@@ -515,6 +517,7 @@ export default function GestaoCarteira() {
       setLoadingCarteira(true)
       setExpandedCarteira(carteira.id)
       setFiltroPassagemCarteira('todos')
+      setFiltroUsuarioCarteira('todos')
 
       const allLeads = await firebaseDataService.getAll('leads')
       const leadsCarteira = allLeads.filter(l => carteira.lista_pacientes.includes(l.id))
@@ -554,16 +557,41 @@ export default function GestaoCarteira() {
     return resumo
   }, [carteiraLeads, carteiraAberta])
 
+  // Usuários que registraram passagens pós-criação nesta carteira
+  const usuariosDaCarteira = useMemo(() => {
+    if (!carteiraAberta) return []
+    const nomes = new Set()
+    carteiraLeads.forEach(lead => {
+      getPassagensPosCarteira(lead, carteiraAberta.data_criacao).forEach(v => {
+        nomes.add(v.registrado_por_nome || 'Não informado')
+      })
+    })
+    return Array.from(nomes).sort((a, b) => a.localeCompare(b, 'pt-BR'))
+  }, [carteiraLeads, carteiraAberta])
+
   const carteiraLeadsExibidos = useMemo(() => {
-    if (!carteiraAberta || filtroPassagemCarteira === 'todos') return carteiraLeads
+    if (!carteiraAberta) return carteiraLeads
+    const comUsuario = filtroUsuarioCarteira !== 'todos'
+    if (!comUsuario && filtroPassagemCarteira === 'todos') return carteiraLeads
     return carteiraLeads.filter(lead => {
-      const passagens = getPassagensPosCarteira(lead, carteiraAberta.data_criacao)
+      // Com usuário selecionado, só as passagens registradas por ele contam —
+      // "quem a Fulana atendeu e converteu?" olha o recorte dela, não o global
+      let passagens = getPassagensPosCarteira(lead, carteiraAberta.data_criacao)
+      if (comUsuario) {
+        passagens = passagens.filter(
+          v => (v.registrado_por_nome || 'Não informado') === filtroUsuarioCarteira
+        )
+        if (passagens.length === 0 && filtroPassagemCarteira !== 'sem') return false
+      }
       if (filtroPassagemCarteira === 'converteu') return passagens.some(isPassagemConvertida)
       if (filtroPassagemCarteira === 'passou') return passagens.length > 0 && !passagens.some(isPassagemConvertida)
-      if (filtroPassagemCarteira === 'sem') return passagens.length === 0
+      if (filtroPassagemCarteira === 'sem') {
+        // "Não retornaram" é sobre a clínica, não sobre um usuário específico
+        return getPassagensPosCarteira(lead, carteiraAberta.data_criacao).length === 0
+      }
       return true
     })
-  }, [carteiraLeads, carteiraAberta, filtroPassagemCarteira])
+  }, [carteiraLeads, carteiraAberta, filtroPassagemCarteira, filtroUsuarioCarteira])
 
   const handleUpdatePerformance = async (carteira) => {
     try {
@@ -1226,7 +1254,7 @@ export default function GestaoCarteira() {
                         ) : (
                           <div className="space-y-3">
                             {/* Quem converteu / retornou sem converter / não voltou */}
-                            <div className="flex flex-wrap gap-2">
+                            <div className="flex flex-wrap items-center gap-2">
                               {[
                                 { valor: 'todos', rotulo: `Todos (${carteiraLeads.length})` },
                                 { valor: 'converteu', rotulo: `Converteram (${resumoPassagens.pacientesConvertidos})` },
@@ -1245,7 +1273,30 @@ export default function GestaoCarteira() {
                                   {opcao.rotulo}
                                 </button>
                               ))}
+                              {usuariosDaCarteira.length > 0 && (
+                                <div className="flex items-center gap-1 ml-auto">
+                                  <span className="text-xs text-gray-500">Usuário:</span>
+                                  <Select value={filtroUsuarioCarteira} onValueChange={setFiltroUsuarioCarteira}>
+                                    <SelectTrigger className="h-7 w-[180px] text-xs bg-white">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="todos">Todos os usuários</SelectItem>
+                                      {usuariosDaCarteira.map(nome => (
+                                        <SelectItem key={nome} value={nome}>{nome}</SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                              )}
                             </div>
+                            {filtroUsuarioCarteira !== 'todos' && (
+                              <p className="text-xs text-purple-600">
+                                Mostrando os pacientes com passagem registrada por {filtroUsuarioCarteira} após a
+                                criação da carteira ({carteiraLeadsExibidos.length}). As contagens dos filtros acima
+                                seguem sendo da carteira inteira.
+                              </p>
+                            )}
 
                             <div className="overflow-x-auto">
                             <table className="w-full text-sm">

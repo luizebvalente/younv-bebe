@@ -181,6 +181,18 @@ export default function RelatorioRecorrentes() {
             })
         }
 
+        // Filtro por usuário: só leads em que a pessoa registrou ao menos uma
+        // passagem. Aplicado AQUI para o relatório INTEIRO (cards, Top 10,
+        // rankings) refletir a pessoa — restrito à lista de passagens, o filtro
+        // parecia não funcionar para quem olhava o resto da página.
+        if (selectedUsuario !== 'todos') {
+            filtered = filtered.filter(lead =>
+                (lead.historico_visitas || []).some(
+                    v => (v.registrado_por_nome || 'Não informado') === selectedUsuario
+                )
+            )
+        }
+
         return filtered
     }
 
@@ -278,7 +290,7 @@ export default function RelatorioRecorrentes() {
             mediaVisitasPorRecorrente,
             leadsComVisitas: leadsComVisitas.length
         }
-    }, [leads, periodFilter, selectedMedicos, dateFilterType, selectedEspecialidadeFilter])
+    }, [leads, periodFilter, selectedMedicos, dateFilterType, selectedEspecialidadeFilter, selectedUsuario])
 
     // Análise mensal de recorrência
     const analiseMenual = useMemo(() => {
@@ -324,7 +336,7 @@ export default function RelatorioRecorrentes() {
                 return new Date(anoA, mesA - 1) - new Date(anoB, mesB - 1)
             })
             .slice(-12)
-    }, [leads, periodFilter, selectedMedicos, dateFilterType, selectedEspecialidadeFilter])
+    }, [leads, periodFilter, selectedMedicos, dateFilterType, selectedEspecialidadeFilter, selectedUsuario])
 
     // Top pacientes recorrentes
     const topRecorrentes = useMemo(() => {
@@ -334,7 +346,7 @@ export default function RelatorioRecorrentes() {
             .filter(lead => lead.total_visitas && lead.total_visitas > 1)
             .sort((a, b) => (b.total_visitas || 0) - (a.total_visitas || 0))
             .slice(0, 10)
-    }, [leads, periodFilter, selectedMedicos, dateFilterType])
+    }, [leads, periodFilter, selectedMedicos, dateFilterType, selectedUsuario])
 
     // Todas as passagens individuais do período, uma linha por visita.
     // É o que faltava para "quem passou pela clínica hoje?": o Top 10 acima é um
@@ -460,7 +472,7 @@ export default function RelatorioRecorrentes() {
             .filter(stats => stats.visitas > 0 || stats.total > 0)
             .sort((a, b) => b.recorrentes - a.recorrentes)
             .slice(0, 10)
-    }, [leads, medicos, periodFilter, selectedMedicos, dateFilterType, selectedEspecialidadeFilter])
+    }, [leads, medicos, periodFilter, selectedMedicos, dateFilterType, selectedEspecialidadeFilter, selectedUsuario])
 
     // Análise de retenção - Dias desde última visita
     const analiseRetencao = useMemo(() => {
@@ -492,7 +504,7 @@ export default function RelatorioRecorrentes() {
             categoria,
             quantidade
         }))
-    }, [leads, periodFilter, selectedMedicos, dateFilterType, selectedEspecialidadeFilter])
+    }, [leads, periodFilter, selectedMedicos, dateFilterType, selectedEspecialidadeFilter, selectedUsuario])
 
     // Análise de frequência de visitas
     const analiseFrequencia = useMemo(() => {
@@ -520,7 +532,7 @@ export default function RelatorioRecorrentes() {
             quantidade,
             cor: COLORS[Object.keys(categorias).indexOf(categoria) % COLORS.length]
         }))
-    }, [leads, periodFilter, selectedMedicos, dateFilterType, selectedEspecialidadeFilter])
+    }, [leads, periodFilter, selectedMedicos, dateFilterType, selectedEspecialidadeFilter, selectedUsuario])
 
     // Pacientes inativos - sem visita há mais de X dias
     const pacientesInativos = useMemo(() => {
@@ -550,7 +562,7 @@ export default function RelatorioRecorrentes() {
         })
 
         return inativos
-    }, [leads, periodFilter, selectedMedicos, dateFilterType, selectedEspecialidadeFilter])
+    }, [leads, periodFilter, selectedMedicos, dateFilterType, selectedEspecialidadeFilter, selectedUsuario])
 
     // ==========================================
     // CROSSCHECK — DETECÇÃO DE OPORTUNIDADES
@@ -735,7 +747,7 @@ export default function RelatorioRecorrentes() {
         })
 
         return comScore.sort((a, b) => b.score - a.score)
-    }, [leads, periodFilter, selectedMedicos, dateFilterType, selectedEspecialidadeFilter])
+    }, [leads, periodFilter, selectedMedicos, dateFilterType, selectedEspecialidadeFilter, selectedUsuario])
 
     // Aplicar filtros locais da aba Crosscheck
     const crosscheckFiltrado = useMemo(() => {
@@ -833,7 +845,7 @@ export default function RelatorioRecorrentes() {
                 receitaRecorrentes
             }
         }).filter(m => m.totalLeads > 0).sort((a, b) => b.totalLeads - a.totalLeads)
-    }, [leads, medicos, periodFilter, selectedMedicos, dateFilterType, selectedEspecialidadeFilter])
+    }, [leads, medicos, periodFilter, selectedMedicos, dateFilterType, selectedEspecialidadeFilter, selectedUsuario])
 
     // Ranking de canais por volume e conversão
     const rankingCanaisPerformance = useMemo(() => {
@@ -857,7 +869,7 @@ export default function RelatorioRecorrentes() {
             taxaConversao: c.totalLeads > 0 ? ((c.convertidos / c.totalLeads) * 100).toFixed(1) : '0.0',
             taxaRecorrencia: c.totalLeads > 0 ? ((c.recorrentes / c.totalLeads) * 100).toFixed(1) : '0.0'
         })).sort((a, b) => b.totalLeads - a.totalLeads)
-    }, [leads, periodFilter, selectedMedicos, dateFilterType, selectedEspecialidadeFilter])
+    }, [leads, periodFilter, selectedMedicos, dateFilterType, selectedEspecialidadeFilter, selectedUsuario])
 
     // Ranking de especialidades por volume e conversão
     const rankingEspecialidades = useMemo(() => {
@@ -883,7 +895,7 @@ export default function RelatorioRecorrentes() {
                 receita
             }
         }).filter(e => e.totalLeads > 0).sort((a, b) => b.totalLeads - a.totalLeads)
-    }, [leads, especialidades, periodFilter, selectedMedicos, dateFilterType, selectedEspecialidadeFilter])
+    }, [leads, especialidades, periodFilter, selectedMedicos, dateFilterType, selectedEspecialidadeFilter, selectedUsuario])
 
     // Distribuição para gráfico de pizza
     const pieData = useMemo(() => {
@@ -1433,7 +1445,7 @@ export default function RelatorioRecorrentes() {
                                   </SelectContent>
                                 </Select>
                                 <p className="text-[10px] text-gray-400">
-                                    Vale para Passagens no Período e Conversões por Usuário
+                                    Filtra o relatório inteiro pelos pacientes que esta pessoa atendeu
                                 </p>
                             </div>
                             <div className="space-y-2 md:col-span-2">
