@@ -78,6 +78,8 @@ export default function RelatorioRecorrentes() {
     const [selectedMedicos, setSelectedMedicos] = useState([]) // Agora é um array para múltipla seleção
     const [dateFilterType, setDateFilterType] = useState('registro')
     const [selectedEspecialidadeFilter, setSelectedEspecialidadeFilter] = useState('all')
+    // Filtra as passagens (lista + conversões) por quem as registrou
+    const [selectedUsuario, setSelectedUsuario] = useState('todos')
 
     // Estados de modais
     const [showLeadDetails, setShowLeadDetails] = useState(false)
@@ -349,6 +351,7 @@ export default function RelatorioRecorrentes() {
                 // Com médicos selecionados, mostrar só as passagens desses médicos
                 // (o filtro de lead acima mantém o paciente; aqui filtramos a linha)
                 if (selectedMedicos.length > 0 && !selectedMedicos.includes(visita.medico_id)) return
+                if (selectedUsuario !== 'todos' && (visita.registrado_por_nome || 'Não informado') !== selectedUsuario) return
                 linhas.push({ lead, visita })
             })
         })
@@ -359,7 +362,19 @@ export default function RelatorioRecorrentes() {
             valorTotal: linhas.reduce((sum, l) => sum + (parseFloat(l.visita.valor) || 0), 0),
             pacientesUnicos: new Set(linhas.map(l => l.lead.id)).size
         }
-    }, [leads, periodFilter, selectedMedicos, dateFilterType, selectedEspecialidadeFilter])
+    }, [leads, periodFilter, selectedMedicos, dateFilterType, selectedEspecialidadeFilter, selectedUsuario])
+
+    // Usuários que já registraram alguma passagem (sobre TODOS os leads, para a
+    // lista de opções não encolher conforme o próprio filtro é aplicado)
+    const usuariosComPassagem = useMemo(() => {
+        const nomes = new Set()
+        leads.forEach(lead => {
+            (lead.historico_visitas || []).forEach(v => {
+                nomes.add(v.registrado_por_nome || 'Não informado')
+            })
+        })
+        return Array.from(nomes).sort((a, b) => a.localeCompare(b, 'pt-BR'))
+    }, [leads])
 
     // Quem (usuário do sistema) está registrando e convertendo as passagens.
     // registrado_por_nome é o usuário logado que gravou a passagem — a melhor
@@ -928,6 +943,7 @@ export default function RelatorioRecorrentes() {
         setSelectedMedicos([])
         setDateFilterType('registro')
         setSelectedEspecialidadeFilter('all')
+        setSelectedUsuario('todos')
     }
 
     // Imprimir relatório
@@ -1402,6 +1418,23 @@ export default function RelatorioRecorrentes() {
                                     ))}
                                   </SelectContent>
                                 </Select>
+                            </div>
+                            <div className="space-y-1">
+                                <label className="text-xs text-gray-500">Usuário (registrou a passagem)</label>
+                                <Select value={selectedUsuario} onValueChange={setSelectedUsuario}>
+                                  <SelectTrigger className="h-8 text-sm">
+                                    <SelectValue placeholder="Todos" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="todos">Todos os usuários</SelectItem>
+                                    {usuariosComPassagem.map(nome => (
+                                      <SelectItem key={nome} value={nome}>{nome}</SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                                <p className="text-[10px] text-gray-400">
+                                    Vale para Passagens no Período e Conversões por Usuário
+                                </p>
                             </div>
                             <div className="space-y-2 md:col-span-2">
                                 <label className="text-sm font-medium flex items-center justify-between">
