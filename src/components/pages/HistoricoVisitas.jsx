@@ -91,6 +91,7 @@ export default function HistoricoVisitas({ pacienteId, paciente, onUpdate, trigg
   // Formulário de nova visita
   const [visitaForm, setVisitaForm] = useState({
     data_visita: new Date().toISOString().split('T')[0],
+    data_proximo_contato: '',
     medico_id: '',
     especialidade_id: '',
     procedimento_id: '',
@@ -209,6 +210,7 @@ export default function HistoricoVisitas({ pacienteId, paciente, onUpdate, trigg
   const resetForm = () => {
     setVisitaForm({
       data_visita: new Date().toISOString().split('T')[0],
+      data_proximo_contato: '',
       medico_id: '',
       especialidade_id: '',
       procedimento_id: '',
@@ -242,6 +244,8 @@ export default function HistoricoVisitas({ pacienteId, paciente, onUpdate, trigg
         // Sufixo aleatório evita colisão de id (dois saves no mesmo milissegundo)
         id: editingVisita?.id || `visita_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
         data_visita: visitaForm.data_visita,
+        // Quando entrar em contato com o paciente de novo (retorno/follow-up)
+        data_proximo_contato: visitaForm.data_proximo_contato || '',
         medico_id: visitaForm.medico_id,
         medico_nome: getMedicoNome(visitaForm.medico_id),
         especialidade_id: visitaForm.especialidade_id,
@@ -327,6 +331,13 @@ export default function HistoricoVisitas({ pacienteId, paciente, onUpdate, trigg
         tipo_visita: totalVisitas > 1 || pacienteAtual?.tipo_visita === 'Recorrente'
           ? 'Recorrente'
           : 'Primeira Visita',
+        // Passagem convertida PROMOVE o lead: sem isso o paciente convertia na
+        // passagem mas o status do lead ficava para trás — invisível como
+        // convertido no funil, nas contagens dos relatórios e no Pós-Consulta.
+        // Só promove; os demais status de passagem não mexem no lead.
+        ...(['Convertido', 'Convertido Parcial'].includes(novaVisita.status) && {
+          status: novaVisita.status
+        }),
         visitas_por_especialidade: visitasPorEspecialidade
       })
 
@@ -353,6 +364,7 @@ export default function HistoricoVisitas({ pacienteId, paciente, onUpdate, trigg
     setEditingVisita(visita)
     setVisitaForm({
       data_visita: visita.data_visita || '',
+      data_proximo_contato: visita.data_proximo_contato || '',
       medico_id: visita.medico_id || '',
       especialidade_id: visita.especialidade_id || '',
       procedimento_id: visita.procedimento_id || '',
@@ -458,6 +470,7 @@ export default function HistoricoVisitas({ pacienteId, paciente, onUpdate, trigg
       'Valor',
       'Local',
       'Status',
+      'Próximo Contato',
       'Tags',
       'Observações',
       'Registrado Por',
@@ -483,6 +496,7 @@ export default function HistoricoVisitas({ pacienteId, paciente, onUpdate, trigg
           `"${formatCurrency(item.valor || 0)}"`,
           `"${item.local || ''}"`,
           `"${item.status || ''}"`,
+          `"${item.data_proximo_contato ? formatDate(item.data_proximo_contato) : ''}"`,
           `"${tagNames}"`,
           `"${item.observacoes || ''}"`,
           `"${item.registrado_por_nome || ''}"`,
@@ -1055,6 +1069,19 @@ export default function HistoricoVisitas({ pacienteId, paciente, onUpdate, trigg
                         </Select>
                       </div>
 
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">Próximo Contato</label>
+                        <Input
+                          type="date"
+                          value={visitaForm.data_proximo_contato}
+                          onChange={(e) => setVisitaForm({ ...visitaForm, data_proximo_contato: e.target.value })}
+                          className="bg-white"
+                        />
+                        <p className="text-[11px] text-gray-500">
+                          Quando entrar em contato com o paciente de novo
+                        </p>
+                      </div>
+
                       <div className="space-y-2 md:col-span-2 lg:col-span-4">
                         <label className="text-sm font-medium flex items-center gap-2">
                           <Tag className="h-4 w-4 text-blue-600" />
@@ -1207,6 +1234,7 @@ export default function HistoricoVisitas({ pacienteId, paciente, onUpdate, trigg
                             <TableHead className="text-right">Valor</TableHead>
                             <TableHead>Local</TableHead>
                             <TableHead>Status</TableHead>
+                            <TableHead>Próx. Contato</TableHead>
                             <TableHead>Ações</TableHead>
                           </TableRow>
                         </TableHeader>
@@ -1249,6 +1277,15 @@ export default function HistoricoVisitas({ pacienteId, paciente, onUpdate, trigg
                                 <Badge className={getStatusColor(visita.status)}>
                                   {visita.status || '—'}
                                 </Badge>
+                              </TableCell>
+                              <TableCell className="text-sm">
+                                {visita.data_proximo_contato ? (
+                                  <span className="text-blue-600 font-medium whitespace-nowrap">
+                                    {formatDate(visita.data_proximo_contato)}
+                                  </span>
+                                ) : (
+                                  <span className="text-gray-400">—</span>
+                                )}
                               </TableCell>
                               <TableCell>
                                 <div className="flex gap-1">

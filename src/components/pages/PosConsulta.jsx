@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { useAuth } from '@/contexts/AuthContext'
 import firebaseDataService from '@/services/firebaseDataService'
-import { parseLocalDate } from '@/constants/crm'
+import { isLeadConvertido, parseLocalDate } from '@/constants/crm'
 
 export default function PosConsulta() {
   const { user } = useAuth()
@@ -74,11 +74,20 @@ export default function PosConsulta() {
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
 
     return leads.filter(lead => {
-      if (lead.status !== 'Convertido' && lead.status !== 'Agendado') return false
+      // isLeadConvertido: cobre Convertido, Convertido Parcial e orçamento
+      // fechado — comparar só com 'Convertido' deixava convertidos de fora
+      if (!isLeadConvertido(lead) && lead.status !== 'Agendado') return false
 
-      const dataRegistro = lead.data_registro_contato ? new Date(lead.data_registro_contato) : null
-      return dataRegistro && dataRegistro >= thirtyDaysAgo
-    }).sort((a, b) => new Date(b.data_registro_contato) - new Date(a.data_registro_contato))
+      // Atividade REAL, não data de cadastro: um recorrente convertido hoje
+      // mas cadastrado há meses nunca passava na janela de 30 dias
+      const atividade = lead.ultima_visita || lead.data_ultima_alteracao || lead.data_registro_contato
+      const dataAtividade = atividade ? new Date(atividade) : null
+      return dataAtividade && !Number.isNaN(dataAtividade.getTime()) && dataAtividade >= thirtyDaysAgo
+    }).sort((a, b) => {
+      const atA = a.ultima_visita || a.data_ultima_alteracao || a.data_registro_contato
+      const atB = b.ultima_visita || b.data_ultima_alteracao || b.data_registro_contato
+      return new Date(atB) - new Date(atA)
+    })
   }, [leads])
 
   // Filtered registros
