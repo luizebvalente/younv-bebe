@@ -64,6 +64,10 @@ import { STATUS_COLORS, STATUS_VISITA_COLORS, parseLocalDate } from '@/constants
 
 const COLORS = ['#8b5cf6', '#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#06b6d4', '#ec4899']
 
+// Busca sem acento: "jose" precisa achar "José"
+const semAcento = (texto) =>
+    (texto || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+
 export default function RelatorioRecorrentes() {
     // Estados principais
     const [leads, setLeads] = useState([])
@@ -80,6 +84,8 @@ export default function RelatorioRecorrentes() {
     const [selectedEspecialidadeFilter, setSelectedEspecialidadeFilter] = useState('all')
     // Filtra as passagens (lista + conversões) por quem as registrou
     const [selectedUsuario, setSelectedUsuario] = useState('todos')
+    // Busca por paciente na lista de passagens ("quantas passagens a Fulana teve?")
+    const [buscaPacientePassagens, setBuscaPacientePassagens] = useState('')
 
     // Estados de modais
     const [showLeadDetails, setShowLeadDetails] = useState(false)
@@ -357,7 +363,18 @@ export default function RelatorioRecorrentes() {
         const temPeriodo = Boolean(periodFilter.startDate || periodFilter.endDate)
         const linhas = []
 
+        // Busca por paciente: com um nome digitado, o card vira o resumo daquele
+        // paciente — o total no título responde "quantas passagens ele teve"
+        const termoBusca = semAcento(buscaPacientePassagens.trim())
+        const digitosBusca = buscaPacientePassagens.replace(/\D/g, '')
+
         filteredLeads.forEach(lead => {
+            if (termoBusca) {
+                const nomeCasa = semAcento(lead.nome_paciente).includes(termoBusca)
+                const telefoneCasa = digitosBusca.length >= 3 &&
+                    (lead.telefone || '').replace(/\D/g, '').includes(digitosBusca)
+                if (!nomeCasa && !telefoneCasa) return
+            }
             (lead.historico_visitas || []).forEach(visita => {
                 if (temPeriodo && !visitaNoPeriodo(visita)) return
                 // Com médicos selecionados, mostrar só as passagens desses médicos
@@ -374,7 +391,7 @@ export default function RelatorioRecorrentes() {
             valorTotal: linhas.reduce((sum, l) => sum + (parseFloat(l.visita.valor) || 0), 0),
             pacientesUnicos: new Set(linhas.map(l => l.lead.id)).size
         }
-    }, [leads, periodFilter, selectedMedicos, dateFilterType, selectedEspecialidadeFilter, selectedUsuario])
+    }, [leads, periodFilter, selectedMedicos, dateFilterType, selectedEspecialidadeFilter, selectedUsuario, buscaPacientePassagens])
 
     // Usuários que já registraram alguma passagem (sobre TODOS os leads, para a
     // lista de opções não encolher conforme o próprio filtro é aplicado)
@@ -1925,10 +1942,35 @@ export default function RelatorioRecorrentes() {
                     </CardDescription>
                 </CardHeader>
                 <CardContent>
+                    {/* Busca por paciente: o total do título vira o resumo dele —
+                        "quantas passagens a Fulana teve?" em uma digitada */}
+                    <div className="relative mb-3 max-w-sm">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                        <Input
+                            value={buscaPacientePassagens}
+                            onChange={(e) => setBuscaPacientePassagens(e.target.value)}
+                            placeholder="Buscar paciente por nome ou telefone..."
+                            className="h-9 pl-9"
+                        />
+                        {buscaPacientePassagens && (
+                            <button
+                                type="button"
+                                onClick={() => setBuscaPacientePassagens('')}
+                                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-lg leading-none"
+                                title="Limpar busca"
+                            >
+                                ×
+                            </button>
+                        )}
+                    </div>
                     {passagensPeriodo.linhas.length === 0 ? (
                         <div className="text-center py-8 text-gray-500">
                             <Activity className="h-12 w-12 mx-auto mb-3 text-gray-300" />
-                            <p>Nenhuma passagem registrada no período</p>
+                            <p>
+                                {buscaPacientePassagens.trim()
+                                    ? `Nenhuma passagem encontrada para "${buscaPacientePassagens.trim()}"`
+                                    : 'Nenhuma passagem registrada no período'}
+                            </p>
                         </div>
                     ) : (
                         <div className="rounded-md border">
