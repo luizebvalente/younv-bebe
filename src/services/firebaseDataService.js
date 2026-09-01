@@ -184,6 +184,7 @@ class FirebaseDataService {
         historicoVisitas: (data.historico_visitas || []).map(visita => ({
           id: visita.id || '',
           dataVisita: visita.data_visita || '',
+          dataProximoContato: visita.data_proximo_contato || '',
           medicoId: visita.medico_id || '',
           medicoNome: visita.medico_nome || '',
           especialidadeId: visita.especialidade_id || '',
@@ -365,6 +366,7 @@ class FirebaseDataService {
         historico_visitas: (data.historicoVisitas || []).map(visita => ({
           id: visita.id,
           data_visita: visita.dataVisita,
+          data_proximo_contato: visita.dataProximoContato || '',
           medico_id: visita.medicoId,
           medico_nome: visita.medicoNome,
           especialidade_id: visita.especialidadeId,

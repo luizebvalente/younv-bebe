@@ -1167,7 +1167,7 @@ export default function RelatorioRecorrentes() {
 
             // --- Aba: Passagens do Período (sem o corte de 100 linhas da tela) ---
             const passagensData = [
-                ['Data', 'Paciente', 'Telefone', 'Médico', 'Especialidade', 'Tipo', 'Status', 'Registrado por', 'Valor', 'Observações'],
+                ['Data', 'Paciente', 'Telefone', 'Médico', 'Especialidade', 'Tipo', 'Status', 'Registrado por', 'Próximo Contato', 'Valor', 'Observações'],
                 ...passagensPeriodo.linhas.map(({ lead, visita }) => [
                     visita.data_visita ? parseLocalDate(visita.data_visita).toLocaleDateString('pt-BR') : 'N/A',
                     lead.nome_paciente || 'N/A',
@@ -1177,12 +1177,13 @@ export default function RelatorioRecorrentes() {
                     visita.tipo_visita || 'Consulta',
                     visita.status || '',
                     visita.registrado_por_nome || '',
+                    visita.data_proximo_contato ? parseLocalDate(visita.data_proximo_contato).toLocaleDateString('pt-BR') : '',
                     parseFloat(visita.valor) || 0,
                     visita.observacoes || ''
                 ])
             ]
             const wsPassagens = XLSX.utils.aoa_to_sheet(passagensData)
-            wsPassagens['!cols'] = [{ wch: 12 }, { wch: 30 }, { wch: 16 }, { wch: 28 }, { wch: 20 }, { wch: 14 }, { wch: 18 }, { wch: 24 }, { wch: 12 }, { wch: 50 }]
+            wsPassagens['!cols'] = [{ wch: 12 }, { wch: 30 }, { wch: 16 }, { wch: 28 }, { wch: 20 }, { wch: 14 }, { wch: 18 }, { wch: 24 }, { wch: 15 }, { wch: 12 }, { wch: 50 }]
             XLSX.utils.book_append_sheet(wb, wsPassagens, 'Passagens')
 
             // --- Aba: Conversões por Usuário ---
@@ -1941,6 +1942,7 @@ export default function RelatorioRecorrentes() {
                                         <TableHead>Tipo</TableHead>
                                         <TableHead>Status</TableHead>
                                         <TableHead>Registrado por</TableHead>
+                                        <TableHead>Próx. Contato</TableHead>
                                         <TableHead className="text-right">Valor</TableHead>
                                     </TableRow>
                                 </TableHeader>
@@ -1965,6 +1967,11 @@ export default function RelatorioRecorrentes() {
                                             </TableCell>
                                             <TableCell className="text-sm text-gray-600">
                                                 {visita.registrado_por_nome || '—'}
+                                            </TableCell>
+                                            <TableCell className="text-sm whitespace-nowrap">
+                                                {visita.data_proximo_contato
+                                                    ? <span className="text-blue-600 font-medium">{parseLocalDate(visita.data_proximo_contato).toLocaleDateString('pt-BR')}</span>
+                                                    : <span className="text-gray-400">—</span>}
                                             </TableCell>
                                             <TableCell className="text-right text-sm font-medium text-green-600">
                                                 {formatCurrency(visita.valor)}
