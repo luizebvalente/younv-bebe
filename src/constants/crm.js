@@ -184,9 +184,13 @@ export const DISC_PROFILES = [
 ]
 
 // --- Tipos de Visita ---
+// 'Contato' = ligação/WhatsApp com o paciente (ex.: recorrente Em Conversa).
+// Entra na linha do tempo e nos relatórios de passagens, mas NÃO conta como
+// visita nas estatísticas (total, valor, frequência) — ver HistoricoVisitas.
 export const TIPOS_VISITA = [
   'Consulta',
   'Retorno',
+  'Contato',
   'Procedimento',
   'Exame',
   'Pré-Operatório',

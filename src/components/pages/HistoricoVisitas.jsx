@@ -276,27 +276,32 @@ export default function HistoricoVisitas({ pacienteId, paciente, onUpdate, trigg
       // Ordenar por data mais recente
       novoHistorico.sort((a, b) => new Date(b.data_visita) - new Date(a.data_visita))
 
+      // Contatos (ligação/WhatsApp) ficam na linha do tempo e nos relatórios de
+      // passagens, mas NÃO são visitas: fora do total, do valor, da frequência
+      // e de primeira/última visita — senão cada ligação inflaria a recorrência
+      const visitasReais = novoHistorico.filter(v => v.tipo_visita !== 'Contato')
+
       // Calcular estatísticas de recorrência
-      const primeiraVisita = novoHistorico[novoHistorico.length - 1]?.data_visita
-      const ultimaVisita = novoHistorico[0]?.data_visita
-      const totalVisitas = novoHistorico.length
-      const valorTotalVisitas = novoHistorico.reduce((sum, v) => sum + (parseFloat(v.valor) || 0), 0)
+      const primeiraVisita = visitasReais[visitasReais.length - 1]?.data_visita || null
+      const ultimaVisita = visitasReais[0]?.data_visita || null
+      const totalVisitas = visitasReais.length
+      const valorTotalVisitas = visitasReais.reduce((sum, v) => sum + (parseFloat(v.valor) || 0), 0)
 
       // Calcular média de dias entre visitas
       let mediaDiasEntreVisitas = 0
-      if (novoHistorico.length > 1) {
+      if (visitasReais.length > 1) {
         let totalDias = 0
-        for (let i = 0; i < novoHistorico.length - 1; i++) {
-          const dataAtual = new Date(novoHistorico[i].data_visita)
-          const dataAnterior = new Date(novoHistorico[i + 1].data_visita)
+        for (let i = 0; i < visitasReais.length - 1; i++) {
+          const dataAtual = new Date(visitasReais[i].data_visita)
+          const dataAnterior = new Date(visitasReais[i + 1].data_visita)
           totalDias += Math.abs((dataAtual - dataAnterior) / (1000 * 60 * 60 * 24))
         }
-        mediaDiasEntreVisitas = Math.round(totalDias / (novoHistorico.length - 1))
+        mediaDiasEntreVisitas = Math.round(totalDias / (visitasReais.length - 1))
       }
 
       // Calcular recorrencia por especialidade
       const visitasPorEspecialidade = {}
-      novoHistorico.forEach(v => {
+      visitasReais.forEach(v => {
         const espId = v.especialidade_id || 'sem_especialidade'
         visitasPorEspecialidade[espId] = (visitasPorEspecialidade[espId] || 0) + 1
       })
@@ -330,7 +335,10 @@ export default function HistoricoVisitas({ pacienteId, paciente, onUpdate, trigg
         // rebaixava o lead e o sumia do relatório de recorrentes.
         tipo_visita: totalVisitas > 1 || pacienteAtual?.tipo_visita === 'Recorrente'
           ? 'Recorrente'
-          : 'Primeira Visita',
+          : totalVisitas === 1
+            ? 'Primeira Visita'
+            // Só contatos, nenhuma visita real: não mexe na classificação
+            : (pacienteAtual?.tipo_visita || ''),
         // Passagem convertida PROMOVE o lead: sem isso o paciente convertia na
         // passagem mas o status do lead ficava para trás — invisível como
         // convertido no funil, nas contagens dos relatórios e no Pós-Consulta.
@@ -386,27 +394,30 @@ export default function HistoricoVisitas({ pacienteId, paciente, onUpdate, trigg
 
       const novoHistorico = historico.filter(v => v.id !== visitaId)
 
+      // Mesmo recorte do save: contatos não entram nas estatísticas de visita
+      const visitasReais = novoHistorico.filter(v => v.tipo_visita !== 'Contato')
+
       // Recalcular estatísticas
-      const primeiraVisita = novoHistorico[novoHistorico.length - 1]?.data_visita || null
-      const ultimaVisita = novoHistorico[0]?.data_visita || null
-      const totalVisitas = novoHistorico.length
-      const valorTotalVisitas = novoHistorico.reduce((sum, v) => sum + (parseFloat(v.valor) || 0), 0)
+      const primeiraVisita = visitasReais[visitasReais.length - 1]?.data_visita || null
+      const ultimaVisita = visitasReais[0]?.data_visita || null
+      const totalVisitas = visitasReais.length
+      const valorTotalVisitas = visitasReais.reduce((sum, v) => sum + (parseFloat(v.valor) || 0), 0)
 
       let mediaDiasEntreVisitas = 0
-      if (novoHistorico.length > 1) {
+      if (visitasReais.length > 1) {
         let totalDias = 0
-        for (let i = 0; i < novoHistorico.length - 1; i++) {
-          const dataAtual = new Date(novoHistorico[i].data_visita)
-          const dataAnterior = new Date(novoHistorico[i + 1].data_visita)
+        for (let i = 0; i < visitasReais.length - 1; i++) {
+          const dataAtual = new Date(visitasReais[i].data_visita)
+          const dataAnterior = new Date(visitasReais[i + 1].data_visita)
           totalDias += Math.abs((dataAtual - dataAnterior) / (1000 * 60 * 60 * 24))
         }
-        mediaDiasEntreVisitas = Math.round(totalDias / (novoHistorico.length - 1))
+        mediaDiasEntreVisitas = Math.round(totalDias / (visitasReais.length - 1))
       }
 
       // Recalcular recorrência por especialidade (antes só o save recalculava —
       // excluir a única visita de uma especialidade deixava a contagem antiga para sempre)
       const visitasPorEspecialidadeDel = {}
-      novoHistorico.forEach(v => {
+      visitasReais.forEach(v => {
         const espId = v.especialidade_id || 'sem_especialidade'
         visitasPorEspecialidadeDel[espId] = (visitasPorEspecialidadeDel[espId] || 0) + 1
       })
@@ -516,9 +527,10 @@ export default function HistoricoVisitas({ pacienteId, paciente, onUpdate, trigg
     document.body.removeChild(link)
   }
 
-  // Estatísticas calculadas
+  // Estatísticas calculadas — contatos ficam de fora, como no lead gravado
   const estatisticas = useMemo(() => {
-    if (!historico || historico.length === 0) {
+    const visitasReais = (historico || []).filter(v => v.tipo_visita !== 'Contato')
+    if (visitasReais.length === 0) {
       return {
         total: 0,
         valorTotal: 0,
@@ -531,10 +543,10 @@ export default function HistoricoVisitas({ pacienteId, paciente, onUpdate, trigg
       }
     }
 
-    const sortedHistorico = [...historico].sort((a, b) => new Date(a.data_visita) - new Date(b.data_visita))
+    const sortedHistorico = [...visitasReais].sort((a, b) => new Date(a.data_visita) - new Date(b.data_visita))
     const primeiraVisita = sortedHistorico[0]?.data_visita
     const ultimaVisita = sortedHistorico[sortedHistorico.length - 1]?.data_visita
-    const valorTotal = historico.reduce((sum, v) => sum + (parseFloat(v.valor) || 0), 0)
+    const valorTotal = visitasReais.reduce((sum, v) => sum + (parseFloat(v.valor) || 0), 0)
 
     const hoje = new Date()
     const diasDesdeUltimaVisita = ultimaVisita
@@ -556,9 +568,9 @@ export default function HistoricoVisitas({ pacienteId, paciente, onUpdate, trigg
     }
 
     return {
-      total: historico.length,
+      total: visitasReais.length,
       valorTotal,
-      ticketMedio: historico.length > 0 ? valorTotal / historico.length : 0,
+      ticketMedio: visitasReais.length > 0 ? valorTotal / visitasReais.length : 0,
       primeiraVisita,
       ultimaVisita,
       diasDesdeUltimaVisita,
@@ -653,7 +665,7 @@ export default function HistoricoVisitas({ pacienteId, paciente, onUpdate, trigg
                   className="bg-purple-600 hover:bg-purple-700"
                 >
                   <Plus className="h-4 w-4 mr-2" />
-                  Registrar Nova Visita
+                  Registrar Visita/Contato
                 </Button>
               </div>
 
@@ -945,7 +957,7 @@ export default function HistoricoVisitas({ pacienteId, paciente, onUpdate, trigg
                   <CardContent>
                     <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4">
                       <div className="space-y-2">
-                        <label className="text-sm font-medium">Data da Visita *</label>
+                        <label className="text-sm font-medium">Data da Visita/Contato *</label>
                         <Input
                           type="date"
                           value={visitaForm.data_visita}
