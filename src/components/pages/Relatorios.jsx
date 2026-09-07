@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react'
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { 
   BarChart, 
@@ -87,6 +87,12 @@ const Relatorios = () => {
 
   // Estados para filtro por procedimento
   const [selectedProcedimentoFilter, setSelectedProcedimentoFilter] = useState('all')
+
+  // Convertidos por atendente. O sistema não grava "quem marcou Convertido", então
+  // atendenteBase escolhe o proxy: 'alterado' (quem mexeu por último no lead — quem
+  // fechou, na prática) ou 'criado' (quem captou o lead).
+  const [selectedAtendenteFilter, setSelectedAtendenteFilter] = useState('all')
+  const [atendenteBase, setAtendenteBase] = useState('alterado')
   const [procedimentos, setProcedimentos] = useState([])
 
   // Estados para filtro por tags
@@ -165,6 +171,12 @@ const Relatorios = () => {
     }
   }, [periodFilter.startDate, periodFilter.endDate, leads, dateFilterType])
 
+  // Nome do atendente do lead conforme a base escolhida
+  const getAtendente = useCallback(
+    (lead) => (atendenteBase === 'criado' ? lead.criado_por_nome : lead.alterado_por_nome) || 'Não informado',
+    [atendenteBase]
+  )
+
   // Aplicar filtros combinados (período + tags + médico)
   // MEMOIZADO: getFilteredLeads() é chamado dezenas de vezes por render (cards, gráficos,
   // tabelas). Sem memo, cada chamada re-filtrava a lista inteira de leads — O(chamadas × leads).
@@ -196,10 +208,44 @@ const Relatorios = () => {
       )
     }
 
+    // Filtro por atendente — vale para o relatório inteiro, não só para a tabela
+    // de convertidos por atendente
+    if (selectedAtendenteFilter && selectedAtendenteFilter !== 'all') {
+      filtered = filtered.filter(lead => getAtendente(lead) === selectedAtendenteFilter)
+    }
+
     return filtered
-  }, [leads, showPeriodFilter, periodFilter.startDate, periodFilter.endDate, filteredByPeriodLeads, showTagFilter, selectedTagsFilter, selectedMedicoFilter, selectedProcedimentoFilter])
+  }, [leads, showPeriodFilter, periodFilter.startDate, periodFilter.endDate, filteredByPeriodLeads, showTagFilter, selectedTagsFilter, selectedMedicoFilter, selectedProcedimentoFilter, selectedAtendenteFilter, getAtendente])
 
   const getFilteredLeads = () => filteredLeadsMemo
+
+  // Opções do filtro: todos os atendentes da base, não só os do recorte atual —
+  // senão a lista encolhe conforme o próprio filtro é aplicado
+  const atendentesDisponiveis = useMemo(() => {
+    const nomes = new Set()
+    leads.forEach(lead => nomes.add(getAtendente(lead)))
+    return Array.from(nomes).sort((a, b) => a.localeCompare(b, 'pt-BR'))
+  }, [leads, getAtendente])
+
+  // Convertidos por atendente, sobre o mesmo recorte dos demais cards
+  const convertidosPorAtendente = useMemo(() => {
+    const mapa = {}
+    filteredLeadsMemo.forEach(lead => {
+      const nome = getAtendente(lead)
+      if (!mapa[nome]) mapa[nome] = { nome, total: 0, convertidos: 0, receita: 0 }
+      mapa[nome].total++
+      if (isLeadConvertido(lead)) {
+        mapa[nome].convertidos++
+        // Parcial fecha só uma parte do orçamento — usar o valor fechado
+        mapa[nome].receita += lead.orcamento_fechado === 'Parcial'
+          ? (Number(lead.valor_fechado_parcial) || 0)
+          : (Number(lead.valor_orcado) || 0)
+      }
+    })
+    return Object.values(mapa)
+      .map(a => ({ ...a, taxa: a.total > 0 ? (a.convertidos / a.total) * 100 : 0 }))
+      .sort((a, b) => b.convertidos - a.convertidos || b.receita - a.receita)
+  }, [filteredLeadsMemo, getAtendente])
 
   const loadData = async () => {
     try {
@@ -286,6 +332,7 @@ const Relatorios = () => {
   const clearAllFilters = () => {
     setSelectedMedicoFilter('all')
     setSelectedProcedimentoFilter('all')
+    setSelectedAtendenteFilter('all')
     setSelectedTagsFilter([])
     clearPeriodFilter()
   }
@@ -1683,7 +1730,22 @@ const Relatorios = () => {
               </Select>
             </div>
 
-            {(selectedMedicoFilter !== 'all' || selectedProcedimentoFilter !== 'all' || selectedTagsFilter.length > 0 || (periodFilter.startDate && periodFilter.endDate)) && (
+            <div className="space-y-1">
+              <label className="text-xs text-gray-500">Atendente</label>
+              <Select value={selectedAtendenteFilter} onValueChange={setSelectedAtendenteFilter}>
+                <SelectTrigger className="h-8 text-sm w-[190px]">
+                  <SelectValue placeholder="Todos" />
+                </SelectTrigger>
+                <SelectContent className="max-h-[300px] overflow-y-auto">
+                  <SelectItem value="all">Todos os atendentes</SelectItem>
+                  {atendentesDisponiveis.map(nome => (
+                    <SelectItem key={nome} value={nome}>{nome}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {(selectedMedicoFilter !== 'all' || selectedProcedimentoFilter !== 'all' || selectedAtendenteFilter !== 'all' || selectedTagsFilter.length > 0 || (periodFilter.startDate && periodFilter.endDate)) && (
               <Button
                 variant="outline"
                 size="sm"
@@ -2600,6 +2662,91 @@ const Relatorios = () => {
               <Users className="h-12 w-12 mx-auto text-gray-400 mb-4" />
               <p className="text-gray-500">Nenhum dado de médicos disponível.</p>
               <p className="text-gray-400 text-sm">Cadastre médicos e leads para ver os relatórios.</p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Convertidos por Atendente */}
+      <Card>
+        <CardHeader>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <CardTitle>Convertidos por Atendente</CardTitle>
+              <p className="text-sm text-gray-600">
+                Respeita os filtros acima (período, médico, procedimento, tags)
+              </p>
+            </div>
+            {/* O sistema não grava quem marcou 'Convertido'; o usuário escolhe o
+                proxy em vez de receber um número sem saber de onde veio */}
+            <div className="flex items-center gap-2 text-sm">
+              <span className="text-gray-500">Considerar:</span>
+              <button
+                onClick={() => setAtendenteBase('alterado')}
+                className={`px-2 py-1 rounded text-xs ${atendenteBase === 'alterado' ? 'bg-blue-100 text-blue-800 font-medium' : 'text-gray-500 hover:bg-gray-100'}`}
+              >
+                Quem fechou (última alteração)
+              </button>
+              <button
+                onClick={() => setAtendenteBase('criado')}
+                className={`px-2 py-1 rounded text-xs ${atendenteBase === 'criado' ? 'bg-blue-100 text-blue-800 font-medium' : 'text-gray-500 hover:bg-gray-100'}`}
+              >
+                Quem cadastrou
+              </button>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {convertidosPorAtendente.length === 0 ? (
+            <div className="text-center py-8">
+              <Users className="h-12 w-12 mx-auto text-gray-400 mb-4" />
+              <p className="text-gray-500">Nenhum lead no período selecionado.</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b bg-gray-50">
+                    <th className="p-3 text-left">#</th>
+                    <th className="p-3 text-left">Atendente</th>
+                    <th className="p-3 text-center">Leads</th>
+                    <th className="p-3 text-center">Convertidos</th>
+                    <th className="p-3 text-center">Taxa</th>
+                    <th className="p-3 text-right">Receita</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {convertidosPorAtendente.map((a, i) => (
+                    <tr key={a.nome} className="border-b hover:bg-gray-50 transition-colors">
+                      <td className="p-3">
+                        <div className="w-7 h-7 bg-blue-100 rounded-full flex items-center justify-center">
+                          <span className="text-blue-600 font-bold text-xs">{i + 1}</span>
+                        </div>
+                      </td>
+                      <td className="p-3 font-medium">{a.nome}</td>
+                      <td className="p-3 text-center text-gray-600">{a.total}</td>
+                      <td className="p-3 text-center">
+                        <Badge className={a.convertidos > 0 ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'}>
+                          {a.convertidos}
+                        </Badge>
+                      </td>
+                      <td className="p-3 text-center text-gray-600">{a.taxa.toFixed(1)}%</td>
+                      <td className="p-3 text-right font-medium text-green-600">{formatCurrency(a.receita)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t-2 bg-gray-50 font-semibold">
+                    <td className="p-3" colSpan={2}>Total</td>
+                    <td className="p-3 text-center">{convertidosPorAtendente.reduce((s, a) => s + a.total, 0)}</td>
+                    <td className="p-3 text-center">{convertidosPorAtendente.reduce((s, a) => s + a.convertidos, 0)}</td>
+                    <td className="p-3"></td>
+                    <td className="p-3 text-right text-green-700">
+                      {formatCurrency(convertidosPorAtendente.reduce((s, a) => s + a.receita, 0))}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
             </div>
           )}
         </CardContent>
