@@ -988,7 +988,10 @@ export default function Leads() {
   const formatDate = useCallback((dateString) => {
     if (!dateString) return 'Não informado'
     try {
-      return new Date(dateString).toLocaleDateString('pt-BR')
+      // parseLocalDate: 'YYYY-MM-DD' é lido como data LOCAL. Com new Date() puro
+      // a string vira UTC e, no Brasil, exibia o dia anterior — o aviso do filtro
+      // dizia "de 31/08 até 01/09" para um filtro de 01/09 a 02/09.
+      return parseLocalDate(dateString).toLocaleDateString('pt-BR')
     } catch {
       return 'Data inválida'
     }
