@@ -1184,7 +1184,7 @@ export default function RelatorioRecorrentes() {
 
             // --- Aba: Passagens do Período (sem o corte de 100 linhas da tela) ---
             const passagensData = [
-                ['Data', 'Paciente', 'Telefone', 'Médico', 'Especialidade', 'Tipo', 'Status', 'Registrado por', 'Próximo Contato', 'Valor', 'Observações'],
+                ['Data', 'Paciente', 'Telefone', 'Médico', 'Especialidade', 'Tipo', 'Status', 'Registrado por', 'Próximo Contato', 'Valor', 'Taxa de Reserva', 'Observações'],
                 ...passagensPeriodo.linhas.map(({ lead, visita }) => [
                     visita.data_visita ? parseLocalDate(visita.data_visita).toLocaleDateString('pt-BR') : 'N/A',
                     lead.nome_paciente || 'N/A',
@@ -1196,11 +1196,12 @@ export default function RelatorioRecorrentes() {
                     visita.registrado_por_nome || '',
                     visita.data_proximo_contato ? parseLocalDate(visita.data_proximo_contato).toLocaleDateString('pt-BR') : '',
                     parseFloat(visita.valor) || 0,
+                    parseFloat(visita.valor_taxa_reserva) || 0,
                     visita.observacoes || ''
                 ])
             ]
             const wsPassagens = XLSX.utils.aoa_to_sheet(passagensData)
-            wsPassagens['!cols'] = [{ wch: 12 }, { wch: 30 }, { wch: 16 }, { wch: 28 }, { wch: 20 }, { wch: 14 }, { wch: 18 }, { wch: 24 }, { wch: 15 }, { wch: 12 }, { wch: 50 }]
+            wsPassagens['!cols'] = [{ wch: 12 }, { wch: 30 }, { wch: 16 }, { wch: 28 }, { wch: 20 }, { wch: 14 }, { wch: 18 }, { wch: 24 }, { wch: 15 }, { wch: 12 }, { wch: 15 }, { wch: 50 }]
             XLSX.utils.book_append_sheet(wb, wsPassagens, 'Passagens')
 
             // --- Aba: Conversões por Usuário ---

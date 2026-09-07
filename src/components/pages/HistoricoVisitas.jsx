@@ -97,6 +97,7 @@ export default function HistoricoVisitas({ pacienteId, paciente, onUpdate, trigg
     procedimento_id: '',
     tipo_visita: 'Consulta',
     valor: '',
+    valor_taxa_reserva: '',
     local: '',
     observacoes: '',
     status: statusPadraoVisita(),
@@ -216,6 +217,7 @@ export default function HistoricoVisitas({ pacienteId, paciente, onUpdate, trigg
       procedimento_id: '',
       tipo_visita: 'Consulta',
       valor: '',
+      valor_taxa_reserva: '',
       local: '',
       observacoes: '',
       status: statusPadraoVisita(),
@@ -254,6 +256,8 @@ export default function HistoricoVisitas({ pacienteId, paciente, onUpdate, trigg
         procedimento_nome: getProcedimentoNome(visitaForm.procedimento_id),
         tipo_visita: visitaForm.tipo_visita,
         valor: parseFloat(visitaForm.valor) || 0,
+        // Taxa de reserva da passagem — separada do valor, como no cadastro do lead
+        valor_taxa_reserva: parseFloat(visitaForm.valor_taxa_reserva) || 0,
         local: visitaForm.local,
         observacoes: visitaForm.observacoes,
         tags: visitaForm.tags || [],
@@ -378,6 +382,7 @@ export default function HistoricoVisitas({ pacienteId, paciente, onUpdate, trigg
       procedimento_id: visita.procedimento_id || '',
       tipo_visita: visita.tipo_visita || 'Consulta',
       valor: visita.valor?.toString() || '',
+      valor_taxa_reserva: visita.valor_taxa_reserva ? String(visita.valor_taxa_reserva) : '',
       local: visita.local || '',
       observacoes: visita.observacoes || '',
       status: visita.status || statusPadraoVisita(),
@@ -479,6 +484,7 @@ export default function HistoricoVisitas({ pacienteId, paciente, onUpdate, trigg
       'Especialidade',
       'Procedimento',
       'Valor',
+      'Taxa de Reserva',
       'Local',
       'Status',
       'Próximo Contato',
@@ -505,6 +511,7 @@ export default function HistoricoVisitas({ pacienteId, paciente, onUpdate, trigg
           `"${item.especialidade_nome || ''}"`,
           `"${item.procedimento_nome || ''}"`,
           `"${formatCurrency(item.valor || 0)}"`,
+          `"${formatCurrency(item.valor_taxa_reserva || 0)}"`,
           `"${item.local || ''}"`,
           `"${item.status || ''}"`,
           `"${item.data_proximo_contato ? formatDate(item.data_proximo_contato) : ''}"`,
@@ -1055,6 +1062,18 @@ export default function HistoricoVisitas({ pacienteId, paciente, onUpdate, trigg
                       </div>
 
                       <div className="space-y-2">
+                        <label className="text-sm font-medium">Taxa de Reserva (R$)</label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          placeholder="0,00"
+                          value={visitaForm.valor_taxa_reserva}
+                          onChange={(e) => setVisitaForm({ ...visitaForm, valor_taxa_reserva: e.target.value })}
+                          className="bg-white"
+                        />
+                      </div>
+
+                      <div className="space-y-2">
                         <label className="text-sm font-medium">Local</label>
                         <Input
                           placeholder="Clínica, Hospital, etc."
@@ -1244,6 +1263,7 @@ export default function HistoricoVisitas({ pacienteId, paciente, onUpdate, trigg
                             <TableHead>Especialidade</TableHead>
                             <TableHead>Procedimento</TableHead>
                             <TableHead className="text-right">Valor</TableHead>
+                            <TableHead className="text-right">Taxa Reserva</TableHead>
                             <TableHead>Local</TableHead>
                             <TableHead>Status</TableHead>
                             <TableHead>Próx. Contato</TableHead>
@@ -1278,6 +1298,11 @@ export default function HistoricoVisitas({ pacienteId, paciente, onUpdate, trigg
                               </TableCell>
                               <TableCell className="text-right font-semibold text-green-600">
                                 {formatCurrency(visita.valor)}
+                              </TableCell>
+                              <TableCell className="text-right text-sm">
+                                {visita.valor_taxa_reserva > 0
+                                  ? <span className="text-blue-600 font-medium">{formatCurrency(visita.valor_taxa_reserva)}</span>
+                                  : <span className="text-gray-400">—</span>}
                               </TableCell>
                               <TableCell className="text-sm">
                                 <div className="flex items-center gap-1">
