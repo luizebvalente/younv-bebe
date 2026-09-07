@@ -19,7 +19,7 @@ import { Users, UserPlus, Calendar, TrendingUp, DollarSign, Target, Activity, Lo
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import firebaseDataService from '@/services/firebaseDataService'
-import { STATUS_COLORS, isLeadConvertido } from '@/constants/crm'
+import { STATUS_COLORS, isLeadConvertido, parseLocalDate } from '@/constants/crm'
 
 const Dashboard = () => {
   const [leads, setLeads] = useState([])
@@ -373,7 +373,7 @@ const Dashboard = () => {
   const formatDate = (dateString) => {
     if (!dateString) return 'Não informado'
     try {
-      return new Date(dateString).toLocaleDateString('pt-BR')
+      return parseLocalDate(dateString).toLocaleDateString('pt-BR')
     } catch {
       return 'Data inválida'
     }

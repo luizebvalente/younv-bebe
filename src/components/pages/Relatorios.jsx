@@ -1137,8 +1137,9 @@ const Relatorios = () => {
 
   const formatDate = (dateString) => {
     if (!dateString) return 'Não informado'
-    const date = new Date(dateString)
-    return date.toLocaleDateString('pt-BR')
+    // parseLocalDate: 'YYYY-MM-DD' como data LOCAL — new Date() puro le como
+    // UTC e, no Brasil, exibia o dia anterior no aviso do periodo
+    return parseLocalDate(dateString).toLocaleDateString('pt-BR')
   }
 
   const getStatusBadgeColor = (status) => {

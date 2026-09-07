@@ -212,7 +212,7 @@ export default function RelatorioRecorrentes() {
     const formatDate = (dateString) => {
         if (!dateString) return 'N/A'
         try {
-            return new Date(dateString).toLocaleDateString('pt-BR')
+            return parseLocalDate(dateString).toLocaleDateString('pt-BR')
         } catch {
             return 'N/A'
         }

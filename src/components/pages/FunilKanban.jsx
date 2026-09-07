@@ -28,7 +28,7 @@ import {
   PhoneCall,
   PhoneForwarded
 } from 'lucide-react'
-import { FUNIL_COLUMNS } from '@/constants/crm'
+import { FUNIL_COLUMNS, parseLocalDate } from '@/constants/crm'
 
 // Mapeamento de nomes de ícone para componentes React
 const ICON_MAP = {
@@ -90,7 +90,7 @@ export default function FunilKanban({ leads, medicos, especialidades, tags, onUp
 
   const formatDate = (dateString) => {
     if (!dateString) return 'Não informado'
-    return new Date(dateString).toLocaleDateString('pt-BR')
+    return parseLocalDate(dateString).toLocaleDateString('pt-BR')
   }
 
   const handleDragStart = (e, lead) => {
