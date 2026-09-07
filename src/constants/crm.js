@@ -232,16 +232,16 @@ export const TAG_CATEGORIES = [
 ]
 
 // --- Helper: definição ÚNICA de "lead convertido" ---
-// Antes cada tela usava um critério (Dashboard/Recorrentes: amplo; Relatórios: só status),
-// gerando números divergentes para o mesmo dataset. Critério unificado:
-// status Convertido/Convertido Parcial OU orçamento fechado (Total/Parcial).
+// Critério: o STATUS do lead. É o que o usuário vê na coluna Status e o que ele
+// controla — a contagem tem que bater com a tela.
+//
+// `orcamento_fechado` fazia parte do critério e inflava tudo: na base do younv-in,
+// 514 leads têm orcamento_fechado='Total' independente do status, então 'Não
+// Agendou' (137), 'Sem Interação' (8), 'Desmarcou' (1) e até 'Perdido' (2) eram
+// contados como conversão — 586 "convertidos" para 297 reais, taxa de 90%.
+// O campo diz que existe um orçamento no valor total, não que o paciente fechou.
 export function isLeadConvertido(lead) {
-  return (
-    lead.status === 'Convertido' ||
-    lead.status === 'Convertido Parcial' ||
-    lead.orcamento_fechado === 'Total' ||
-    lead.orcamento_fechado === 'Parcial'
-  )
+  return lead.status === 'Convertido' || lead.status === 'Convertido Parcial'
 }
 
 // --- Helper: parte digitada do "Valor Total Orçado" do lead ---

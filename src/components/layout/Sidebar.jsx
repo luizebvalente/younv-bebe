@@ -1,5 +1,6 @@
 import { Link, useLocation } from 'react-router-dom'
 import { cn } from '@/lib/utils'
+import { isLeadConvertido } from '@/constants/crm'
 import {
   LayoutDashboard,
   UserPlus,
@@ -76,11 +77,7 @@ export default function Sidebar({ isOpen = false, onClose = () => { } }) {
       return agendado || statusAgendado
     }).length
 
-    const leadsConvertidosHoje = leadsHoje.filter(lead => {
-      const statusConvertido = ['Convertido', 'convertido', 'CONVERTIDO'].includes(lead.status)
-      const orcamentoFechado = lead.orcamento_fechado === 'Total' || lead.orcamento_fechado === 'Parcial'
-      return statusConvertido || orcamentoFechado
-    })
+    const leadsConvertidosHoje = leadsHoje.filter(isLeadConvertido)
 
     const receitaHoje = leadsConvertidosHoje.reduce((total, lead) => {
       const valorOrcado = lead.valor_orcado || lead.valorOrcado || 0

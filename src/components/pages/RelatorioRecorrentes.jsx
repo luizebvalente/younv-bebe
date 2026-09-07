@@ -60,7 +60,7 @@ import { Flame, AlertCircle, AlertTriangle, PhoneOff, Snowflake, ArrowUp, Coins,
 import html2canvas from 'html2canvas'
 import * as XLSX from 'xlsx'
 import firebaseDataService from '@/services/firebaseDataService'
-import { STATUS_COLORS, STATUS_VISITA_COLORS, parseLocalDate } from '@/constants/crm'
+import { STATUS_COLORS, STATUS_VISITA_COLORS, isLeadConvertido, parseLocalDate } from '@/constants/crm'
 
 const COLORS = ['#8b5cf6', '#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#06b6d4', '#ec4899']
 
@@ -256,7 +256,7 @@ export default function RelatorioRecorrentes() {
         const valorNovos = novos.reduce((sum, lead) => sum + (lead.valor_orcado || 0), 0)
 
         // Conversões — considera status Convertido OU orçamento fechado
-        const isConvertido = (lead) => lead.status === 'Convertido' || lead.orcamento_fechado === 'Total' || lead.orcamento_fechado === 'Parcial'
+        const isConvertido = isLeadConvertido
         const convertidosRecorrentes = recorrentes.filter(isConvertido).length
         const convertidosNovos = novos.filter(isConvertido).length
 
@@ -836,7 +836,7 @@ export default function RelatorioRecorrentes() {
     // Ranking de médicos por volume e conversão
     const rankingMedicosPerformance = useMemo(() => {
         const filteredLeads = getFilteredLeads()
-        const isConvertido = (lead) => lead.status === 'Convertido' || lead.orcamento_fechado === 'Total' || lead.orcamento_fechado === 'Parcial'
+        const isConvertido = isLeadConvertido
 
         return medicos.map(medico => {
             const medicoLeads = filteredLeads.filter(l => l.medico_agendado_id === medico.id)
@@ -867,7 +867,7 @@ export default function RelatorioRecorrentes() {
     // Ranking de canais por volume e conversão
     const rankingCanaisPerformance = useMemo(() => {
         const filteredLeads = getFilteredLeads()
-        const isConvertido = (lead) => lead.status === 'Convertido' || lead.orcamento_fechado === 'Total' || lead.orcamento_fechado === 'Parcial'
+        const isConvertido = isLeadConvertido
         const canaisMap = {}
 
         filteredLeads.forEach(lead => {
@@ -891,7 +891,7 @@ export default function RelatorioRecorrentes() {
     // Ranking de especialidades por volume e conversão
     const rankingEspecialidades = useMemo(() => {
         const filteredLeads = getFilteredLeads()
-        const isConvertido = (lead) => lead.status === 'Convertido' || lead.orcamento_fechado === 'Total' || lead.orcamento_fechado === 'Parcial'
+        const isConvertido = isLeadConvertido
 
         return especialidades.map(esp => {
             const espLeads = filteredLeads.filter(l => l.especialidade_id === esp.id)

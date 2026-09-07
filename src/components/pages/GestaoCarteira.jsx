@@ -12,7 +12,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { useAuth } from '@/contexts/AuthContext'
 import firebaseDataService from '@/services/firebaseDataService'
 import HistoricoVisitas from '@/components/pages/HistoricoVisitas'
-import { LEAD_STATUSES, STATUS_COLORS, STATUS_VISITA_COLORS, getOrcamentoBase, getValorOrcadoTotal, parseLocalDate } from '@/constants/crm'
+import { LEAD_STATUSES, STATUS_COLORS, STATUS_VISITA_COLORS, getOrcamentoBase, getValorOrcadoTotal, isLeadConvertido, parseLocalDate } from '@/constants/crm'
 
 // Busca sem acento: digitar "jose" precisa achar "José"
 const semAcento = (texto) =>
@@ -387,7 +387,7 @@ export default function GestaoCarteira() {
 
       // Sem retorno: pacientes que já foram convertidos mas não voltaram
       if (filtroSemRetorno) {
-        const foiConvertido = lead.status === 'Convertido' || lead.orcamento_fechado === 'Total' || lead.orcamento_fechado === 'Parcial'
+        const foiConvertido = isLeadConvertido(lead)
         const voltou = (lead.total_visitas || 0) > 1 || lead.tipo_visita === 'Recorrente'
         if (!foiConvertido || voltou) return false
       }
