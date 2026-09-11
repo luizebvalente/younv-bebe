@@ -11,7 +11,16 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { useAuth } from '@/contexts/AuthContext'
 import firebaseDataService from '@/services/firebaseDataService'
-import { isLeadConvertido, parseLocalDate } from '@/constants/crm'
+import { STATUS_COLORS, parseLocalDate } from '@/constants/crm'
+
+// Status que indicam atendimento acontecido ou iminente. Uma passagem
+// registrada entra independente do status — e a evidencia mais forte de que
+// o paciente passou pela clinica.
+const STATUS_ATENDIMENTO = ['Convertido', 'Convertido Parcial', 'Confirmado', 'Agendado', 'Reagendado']
+
+// Busca sem acento: digitar "gesilea" precisa achar "GESILEA"
+const semAcento = (texto) =>
+  (texto || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
 
 export default function PosConsulta() {
   const { user } = useAuth()
@@ -37,6 +46,10 @@ export default function PosConsulta() {
     proximo_retorno: '',
     observacoes_internas: ''
   })
+
+  // Aba Pacientes: busca por paciente e janela de atividade
+  const [buscaPaciente, setBuscaPaciente] = useState('')
+  const [janelaDias, setJanelaDias] = useState('30')
 
   // Registros tab filters
   const [searchTerm, setSearchTerm] = useState('')
@@ -68,27 +81,42 @@ export default function PosConsulta() {
     }
   }
 
-  // Patients with recent activity (last 30 days)
+  // Data de atividade do paciente: passagem registrada > ultima alteracao >
+  // cadastro. E o que define "recente" e a ordenacao da lista.
+  const atividadeDe = (lead) =>
+    lead.ultima_visita || lead.data_ultima_alteracao || lead.data_registro_contato
+
   const pacientesRecentes = useMemo(() => {
-    const thirtyDaysAgo = new Date()
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
+    const termo = semAcento(buscaPaciente.trim())
+    const digitos = buscaPaciente.replace(/\D/g, '')
+    const buscando = termo.length > 0
+    const dias = Number(janelaDias)
+
+    const limite = new Date()
+    if (dias > 0) limite.setDate(limite.getDate() - dias)
 
     return leads.filter(lead => {
-      // isLeadConvertido: cobre Convertido, Convertido Parcial e orçamento
-      // fechado — comparar só com 'Convertido' deixava convertidos de fora
-      if (!isLeadConvertido(lead) && lead.status !== 'Agendado') return false
+      // Busca vence janela e status: quem digita um nome quer achar AQUELA
+      // pessoa, nao ser barrado por ela estar fora da janela de 30 dias.
+      if (buscando) {
+        const nomeCasa = semAcento(lead.nome_paciente).includes(termo)
+        const telefoneCasa = digitos.length >= 3 &&
+          (lead.telefone || '').replace(/\D/g, '').includes(digitos)
+        return nomeCasa || telefoneCasa
+      }
 
-      // Atividade REAL, não data de cadastro: um recorrente convertido hoje
-      // mas cadastrado há meses nunca passava na janela de 30 dias
-      const atividade = lead.ultima_visita || lead.data_ultima_alteracao || lead.data_registro_contato
-      const dataAtividade = atividade ? new Date(atividade) : null
-      return dataAtividade && !Number.isNaN(dataAtividade.getTime()) && dataAtividade >= thirtyDaysAgo
-    }).sort((a, b) => {
-      const atA = a.ultima_visita || a.data_ultima_alteracao || a.data_registro_contato
-      const atB = b.ultima_visita || b.data_ultima_alteracao || b.data_registro_contato
-      return new Date(atB) - new Date(atA)
-    })
-  }, [leads])
+      // Passagem registrada = o paciente passou pela clinica, entra qualquer
+      // que seja o status. Antes a lista exigia status Convertido/Agendado e
+      // sumia com quem foi atendido mas ficou como 'Confirmado'/'Em Conversa'.
+      const temPassagem = Boolean(lead.ultima_visita)
+      if (!temPassagem && !STATUS_ATENDIMENTO.includes(lead.status)) return false
+
+      if (dias <= 0) return true
+      const atividade = atividadeDe(lead)
+      const data = atividade ? new Date(atividade) : null
+      return data && !Number.isNaN(data.getTime()) && data >= limite
+    }).sort((a, b) => new Date(atividadeDe(b) || 0) - new Date(atividadeDe(a) || 0))
+  }, [leads, buscaPaciente, janelaDias])
 
   // Filtered registros
   const filteredRegistros = useMemo(() => {
@@ -161,7 +189,8 @@ export default function PosConsulta() {
       const registroData = {
         lead_id: selectedLead.id,
         nome_paciente: selectedLead.nome_paciente,
-        data_consulta: selectedLead.data_registro_contato || new Date().toISOString(),
+        // A consulta e a passagem registrada; o cadastro e so o fallback
+        data_consulta: selectedLead.ultima_visita || selectedLead.data_registro_contato || new Date().toISOString(),
         resumo_atendimento: formData.resumo_atendimento,
         orientacoes_paciente: formData.orientacoes_paciente,
         proximo_retorno: formData.proximo_retorno,
@@ -276,11 +305,66 @@ export default function PosConsulta() {
       {/* Tab: Pacientes Recentes */}
       {activeTab === 'recentes' && (
         <div className="space-y-4">
+          {/* Busca + janela de atividade */}
+          <Card className="border-0 shadow-md">
+            <CardContent className="p-4">
+              <div className="flex flex-col sm:flex-row gap-3 sm:items-end">
+                <div className="flex-1 space-y-1">
+                  <Label className="text-sm font-medium">Buscar Paciente</Label>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                    <Input
+                      value={buscaPaciente}
+                      onChange={(e) => setBuscaPaciente(e.target.value)}
+                      placeholder="Digite o nome ou telefone do paciente..."
+                      className="h-10 pl-9"
+                    />
+                    {buscaPaciente && (
+                      <button
+                        type="button"
+                        onClick={() => setBuscaPaciente('')}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                        title="Limpar busca"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-sm font-medium">Atividade</Label>
+                  <Select value={janelaDias} onValueChange={setJanelaDias} disabled={Boolean(buscaPaciente.trim())}>
+                    <SelectTrigger className="h-10 w-[190px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="30">Últimos 30 dias</SelectItem>
+                      <SelectItem value="60">Últimos 60 dias</SelectItem>
+                      <SelectItem value="90">Últimos 90 dias</SelectItem>
+                      <SelectItem value="0">Todos os pacientes</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <p className="text-xs text-gray-500 mt-2">
+                {buscaPaciente.trim()
+                  ? `Buscando em todos os ${leads.length} pacientes — a busca ignora a janela de atividade e o status.`
+                  : 'Entram pacientes com passagem registrada ou com status de atendimento (Convertido, Confirmado, Agendado, Reagendado).'}
+              </p>
+            </CardContent>
+          </Card>
+
           {pacientesRecentes.length === 0 ? (
             <Card className="border-0 shadow-lg">
               <CardContent className="text-center py-12">
                 <ClipboardCheck className="h-12 w-12 mx-auto text-gray-300 mb-4" />
-                <p className="text-gray-500">Nenhum paciente com consulta nos últimos 30 dias.</p>
+                <p className="text-gray-500">
+                  {buscaPaciente.trim()
+                    ? `Nenhum paciente encontrado para "${buscaPaciente.trim()}".`
+                    : janelaDias === '0'
+                      ? 'Nenhum paciente com atendimento registrado.'
+                      : `Nenhum paciente com atividade nos últimos ${janelaDias} dias. Tente ampliar a janela ou buscar pelo nome.`}
+                </p>
               </CardContent>
             </Card>
           ) : (
@@ -303,15 +387,19 @@ export default function PosConsulta() {
                               <User className="h-3 w-3" /> {getMedicoNome(lead.medico_agendado_id)}
                             </span>
                             <span className="flex items-center gap-1">
-                              <Calendar className="h-3 w-3" /> {formatDate(lead.data_registro_contato)}
+                              <Calendar className="h-3 w-3" />
+                              {lead.ultima_visita
+                                ? `Passagem: ${formatDate(lead.ultima_visita)}`
+                                : `Cadastro: ${formatDate(lead.data_registro_contato)}`}
                             </span>
+                            {(lead.total_visitas || 0) > 0 && (
+                              <span>{lead.total_visitas} passagem(ns)</span>
+                            )}
                           </div>
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
-                        <Badge className={`text-xs ${
-                          lead.status === 'Convertido' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
-                        }`}>
+                        <Badge className={`text-xs ${STATUS_COLORS[lead.status] || 'bg-gray-100 text-gray-800'}`}>
                           {lead.status}
                         </Badge>
                         <Button
