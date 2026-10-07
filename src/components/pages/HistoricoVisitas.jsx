@@ -757,9 +757,15 @@ export default function HistoricoVisitas({ pacienteId, paciente, onUpdate, trigg
                       {estatisticas.ultimaVisita ? formatDate(estatisticas.ultimaVisita) : 'N/A'}
                     </div>
                     <p className="text-xs text-orange-500 mt-1">
-                      {estatisticas.diasDesdeUltimaVisita > 0
-                        ? `há ${estatisticas.diasDesdeUltimaVisita} dias`
-                        : estatisticas.ultimaVisita ? 'hoje' : ''
+                      {/* Passagem com data futura (consulta ja marcada) dava dias
+                          negativo e caia no 'hoje' — agora diz que esta por vir */}
+                      {!estatisticas.ultimaVisita
+                        ? ''
+                        : estatisticas.diasDesdeUltimaVisita > 0
+                          ? `há ${estatisticas.diasDesdeUltimaVisita} dias`
+                          : estatisticas.diasDesdeUltimaVisita < 0
+                            ? `agendada — em ${Math.abs(estatisticas.diasDesdeUltimaVisita)} dias`
+                            : 'hoje'
                       }
                     </p>
                   </CardContent>
@@ -902,7 +908,11 @@ export default function HistoricoVisitas({ pacienteId, paciente, onUpdate, trigg
                   {/* Resumo */}
                   <div className="mt-6 pt-4 border-t flex items-center justify-between text-sm text-gray-500">
                     <span>
-                      📅 {estatisticas.diasDesdePrimeiraVisita || 0} dias desde o primeiro contato
+                      {/* Nunca negativo: com a 1a passagem marcada para frente, a
+                          conta dava "-16 dias desde o primeiro contato" */}
+                      {estatisticas.diasDesdePrimeiraVisita > 0
+                        ? `📅 ${estatisticas.diasDesdePrimeiraVisita} dias desde o primeiro contato`
+                        : '📅 primeira passagem ainda por acontecer'}
                     </span>
                     <span>
                       🔄 {estatisticas.total} visitas realizadas

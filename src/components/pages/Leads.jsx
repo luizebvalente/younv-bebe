@@ -78,6 +78,10 @@ export default function Leads() {
   const [alteredByFilter, setAlteredByFilter] = useState('Todos')
   const [selectedTagsFilter, setSelectedTagsFilter] = useState([])
   const [showDateFilter, setShowDateFilter] = useState(false)
+  // 'cadastro' (data_registro_contato) ou 'passagem' (qualquer visita do
+  // historico dentro do periodo). So com cadastro, um paciente antigo que
+  // passou pela clinica este mes nao aparecia no filtro deste mes.
+  const [dateFilterTipo, setDateFilterTipo] = useState('cadastro')
   const [dateFilter, setDateFilter] = useState({
     startDate: '',
     endDate: '',
@@ -736,22 +740,24 @@ export default function Leads() {
     if (start) start.setHours(0, 0, 0, 0)
     if (end) end.setHours(23, 59, 59, 999)
 
-    const filtered = leads.filter(lead => {
-      const leadDate = new Date(lead.data_registro_contato)
-
-      if (start && end) {
-        return leadDate >= start && leadDate <= end
-      } else if (start) {
-        return leadDate >= start
-      } else if (end) {
-        return leadDate <= end
-      }
-
+    const dentro = (data) => {
+      if (!data || Number.isNaN(data.getTime())) return false
+      if (start && end) return data >= start && data <= end
+      if (start) return data >= start
+      if (end) return data <= end
       return true
+    }
+
+    const filtered = leads.filter(lead => {
+      if (dateFilterTipo === 'passagem') {
+        // Entra se QUALQUER passagem do historico cair no periodo
+        return (lead.historico_visitas || []).some(v => dentro(parseLocalDate(v.data_visita)))
+      }
+      return dentro(new Date(lead.data_registro_contato))
     })
 
     setFilteredByDateLeads(filtered)
-  }, [leads, dateFilter.startDate, dateFilter.endDate])
+  }, [leads, dateFilter.startDate, dateFilter.endDate, dateFilterTipo])
 
   const exportToCSV = useCallback(() => {
     const leadsToExport = showDateFilter ? filteredByDateLeads : filteredLeads
@@ -2208,6 +2214,29 @@ export default function Leads() {
                     />
                   </div>
                 </div>
+
+                <div className="flex items-center gap-2 text-sm mt-3">
+                  <span className="text-gray-500">Filtrar por:</span>
+                  <button
+                    onClick={() => setDateFilterTipo('cadastro')}
+                    className={`px-2 py-1 rounded text-xs ${dateFilterTipo === 'cadastro' ? 'bg-blue-100 text-blue-800 font-medium' : 'text-gray-500 hover:bg-gray-100'}`}
+                  >
+                    Data de Cadastro
+                  </button>
+                  <button
+                    onClick={() => setDateFilterTipo('passagem')}
+                    className={`px-2 py-1 rounded text-xs ${dateFilterTipo === 'passagem' ? 'bg-purple-100 text-purple-800 font-medium' : 'text-gray-500 hover:bg-gray-100'}`}
+                    title="Inclui o paciente se qualquer passagem dele cair no período"
+                  >
+                    Data da Passagem
+                  </button>
+                </div>
+                {dateFilterTipo === 'passagem' && (
+                  <p className="text-xs text-purple-600 mt-1">
+                    O período olha as passagens registradas: um paciente antigo que passou
+                    pela clinica no período entra na lista.
+                  </p>
+                )}
 
                 {/* Indicador de Filtro Ativo */}
                 {(dateFilter.startDate || dateFilter.endDate) && (

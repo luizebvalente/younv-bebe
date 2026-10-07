@@ -289,6 +289,15 @@ const Relatorios = () => {
     end.setHours(23, 59, 59, 999)
     
     const filtered = leads.filter(lead => {
+      // 'passagem': o paciente entra se QUALQUER visita do historico cair no
+      // periodo. Com cadastro/consulta, um paciente antigo atendido no periodo
+      // ficava de fora do relatorio do periodo.
+      if (dateFilterType === 'passagem') {
+        return (lead.historico_visitas || []).some(v => {
+          const d = parseLocalDate(v.data_visita)
+          return d && !Number.isNaN(d.getTime()) && d >= start && d <= end
+        })
+      }
       const dateField = dateFilterType === 'consulta'
         ? (lead.data_consulta_efetiva || lead.data_registro_contato)
         : lead.data_registro_contato
@@ -1805,7 +1814,20 @@ const Relatorios = () => {
               >
                 Data da Consulta
               </button>
+              <button
+                onClick={() => setDateFilterType('passagem')}
+                className={`px-2 py-1 rounded text-xs ${dateFilterType === 'passagem' ? 'bg-purple-100 text-purple-800 font-medium' : 'text-gray-500'}`}
+                title="Inclui o paciente se qualquer passagem dele cair no período"
+              >
+                Data da Passagem
+              </button>
             </div>
+            {dateFilterType === 'passagem' && (
+              <p className="text-xs text-purple-600">
+                O período olha as passagens registradas: um paciente antigo atendido no
+                período entra no relatório.
+              </p>
+            )}
             <div className="flex flex-wrap gap-2">
               <Button
                 size="sm"
