@@ -2750,7 +2750,10 @@ export default function Leads() {
                                   className="bg-purple-50 border-purple-200 text-purple-700 hover:bg-purple-100 relative"
                                 >
                                   <History className="h-4 w-4" />
-                                  {lead.total_visitas && lead.total_visitas > 1 && (
+                                  {/* > 0, nao > 1: com UMA passagem registrada o badge
+                                      sumia e a lista dava a entender que o paciente nao
+                                      tinha passagem nenhuma */}
+                                  {lead.total_visitas > 0 && (
                                     <Badge className="absolute -top-2 -right-2 bg-purple-600 text-white text-xs px-1.5 py-0.5 rounded-full min-w-[18px] h-[18px] flex items-center justify-center">
                                       {lead.total_visitas}
                                     </Badge>

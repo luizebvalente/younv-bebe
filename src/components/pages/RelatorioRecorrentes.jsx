@@ -80,7 +80,10 @@ export default function RelatorioRecorrentes() {
     const [showPeriodFilter, setShowPeriodFilter] = useState(false)
     const [periodFilter, setPeriodFilter] = useState({ startDate: '', endDate: '' })
     const [selectedMedicos, setSelectedMedicos] = useState([]) // Agora é um array para múltipla seleção
-    const [dateFilterType, setDateFilterType] = useState('registro')
+    // 'atividade' e o padrao DESTE relatorio: recorrencia e sobre RETORNO, entao
+    // o periodo tem que enxergar tambem quem passou pela clinica nele. So por
+    // data de registro, um paciente antigo que voltou hoje ficava de fora.
+    const [dateFilterType, setDateFilterType] = useState('atividade')
     const [selectedEspecialidadeFilter, setSelectedEspecialidadeFilter] = useState('all')
     // Filtra as passagens (lista + conversões) por quem as registrou
     const [selectedUsuario, setSelectedUsuario] = useState('todos')
@@ -147,7 +150,20 @@ export default function RelatorioRecorrentes() {
 
         // Filtro por período
         if (periodFilter.startDate || periodFilter.endDate) {
-            if (dateFilterType === 'passagem') {
+            if (dateFilterType === 'atividade') {
+                // Registro OU passagem no periodo. Nao usar so 'passagem' como
+                // padrao: a adocao de passagens ainda e baixa (18 de 1235 leads no
+                // clarion) e o relatorio ficaria praticamente vazio.
+                const dentroPorRegistro = (lead) => {
+                    const d = new Date(getDateField(lead))
+                    if (periodFilter.startDate && d < new Date(periodFilter.startDate + 'T00:00:00')) return false
+                    if (periodFilter.endDate && d > new Date(periodFilter.endDate + 'T23:59:59.999')) return false
+                    return true
+                }
+                filtered = filtered.filter(lead =>
+                    dentroPorRegistro(lead) || (lead.historico_visitas || []).some(visitaNoPeriodo)
+                )
+            } else if (dateFilterType === 'passagem') {
                 // Modo "Data da Passagem": o lead entra se QUALQUER visita do
                 // histórico cair no período. Antes o período só olhava a data de
                 // registro/consulta do lead — um paciente antigo que passou pela
@@ -1410,6 +1426,13 @@ export default function RelatorioRecorrentes() {
                                 <div className="flex items-center gap-2 text-sm">
                                   <span className="text-gray-500">Filtrar por:</span>
                                   <button
+                                    onClick={() => setDateFilterType('atividade')}
+                                    className={`px-2 py-1 rounded text-xs ${dateFilterType === 'atividade' ? 'bg-green-100 text-green-800 font-medium' : 'text-gray-500'}`}
+                                    title="Cadastrados no período OU que passaram pela clínica nele"
+                                  >
+                                    Atividade no Período
+                                  </button>
+                                  <button
                                     onClick={() => setDateFilterType('registro')}
                                     className={`px-2 py-1 rounded text-xs ${dateFilterType === 'registro' ? 'bg-blue-100 text-blue-800 font-medium' : 'text-gray-500'}`}
                                   >
@@ -1429,10 +1452,17 @@ export default function RelatorioRecorrentes() {
                                     Data da Passagem
                                   </button>
                                 </div>
+                                {dateFilterType === 'atividade' && (
+                                    <p className="text-xs text-green-700">
+                                        Entram os pacientes cadastrados no período E os que passaram pela
+                                        clínica nele — é o recorte que responde "quem retornou".
+                                    </p>
+                                )}
                                 {dateFilterType === 'passagem' && (
                                     <p className="text-xs text-purple-600">
                                         O período olha as datas das passagens registradas: um paciente
                                         antigo que passou pela clínica no período entra no relatório.
+                                        Só aparecem pacientes com passagem registrada.
                                     </p>
                                 )}
                             </div>
